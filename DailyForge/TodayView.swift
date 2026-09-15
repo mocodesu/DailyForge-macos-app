@@ -15,9 +15,18 @@ struct TodayView: View {
     @State private var activeSession: Exercise?
     @State private var showCreateExercise = false
     @State private var showHistory = false
+    @State private var showMinimumAlert = false
     @State private var today = Date()
     @State private var showMilestoneUnlock = false
     @State private var showDayCompletePrompt = false
+
+    #if DEBUG
+    @State private var showManageExercises = false
+    @State private var showResetConfirmation = false
+    #endif
+
+    /// Every day must have at least this many exercises.
+    private let minimumExercises = 5
 
     private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -33,8 +42,20 @@ struct TodayView: View {
 
     // MARK: - Derived state
 
-    private var allDone: Bool {
+    private var meetsMinimum: Bool {
+        exercises.count >= minimumExercises
+    }
+
+    private var remainingToMinimum: Int {
+        max(0, minimumExercises - exercises.count)
+    }
+
+    private var allExercisesDone: Bool {
         DayLogic.allCompletedToday(exercises: exercises, records: records)
+    }
+
+    private var allDone: Bool {
+        meetsMinimum && allExercisesDone
     }
 
     private var isLockedToday: Bool {
@@ -64,9 +85,65 @@ struct TodayView: View {
         return day
     }
 
-    // MARK: - Body
+    private var pendingMilestone: Milestone? {
+        let target = nextMilestoneDay - 30
+        return milestones.first { $0.completedAt == nil && $0.day == target }
+    }
+
+    // MARK: - Body (layered to keep the type-checker fast)
 
     var body: some View {
+        sheetsLayer
+    }
+
+    private var sheetsLayer: some View {
+        alertsLayer
+            .sheet(item: $selectedExercise, content: exerciseDetailSheet)
+            .sheet(isPresented: $showCreateExercise, content: createExerciseSheet)
+            .sheet(isPresented: $showHistory, content: historySheet)
+            .sheet(isPresented: $showDayCompletePrompt, content: dayCompleteSheet)
+            .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
+            #if DEBUG
+            .sheet(isPresented: $showManageExercises) {
+                ManageExercisesView()
+            }
+            #endif
+    }
+
+    private var alertsLayer: some View {
+        lifecycleLayer
+            .alert("Minimum exercises not met", isPresented: $showMinimumAlert) {
+                Button("Add Exercise") { showCreateExercise = true }
+                Button("Later", role: .cancel) { }
+            } message: {
+                Text("You have \(exercises.count) of \(minimumExercises) required daily exercises. Add \(remainingToMinimum) more to start the day.")
+            }
+            #if DEBUG
+            .confirmationDialog(
+                "Reset DailyForge?",
+                isPresented: $showResetConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reset Everything", role: .destructive) {
+                    resetEverything()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This deletes all exercises, history, your profile, day locks, and milestones. You will start over at onboarding. This cannot be undone.")
+            }
+            #endif
+    }
+
+    private var lifecycleLayer: some View {
+        baseLayer
+            .onReceive(minuteTimer, perform: handleMinuteTick)
+            .onAppear(perform: handleAppear)
+            .onChange(of: allDone, handleAllDoneChange)
+            .onChange(of: exercises.count, handleExerciseCountChange)
+            .onChange(of: isLockedToday) { _, _ in publishDayState() }
+    }
+
+    private var baseLayer: some View {
         ZStack {
             mainContent
                 .disabled(activeSession != nil)
@@ -81,72 +158,110 @@ struct TodayView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 600)
-        .onReceive(minuteTimer) { now in
-            today = now
-            checkMilestoneUnlock()
+    }
+
+    // MARK: - Sheet builders
+
+    @ViewBuilder
+    private func exerciseDetailSheet(_ exercise: Exercise) -> some View {
+        ExerciseDetailSheet(
+            exercise: exercise,
+            isCompletedToday: completedToday.contains(exercise.id),
+            onStart: {
+                selectedExercise = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    activeSession = exercise
+                }
+            },
+            onComplete: {
+                selectedExercise = nil
+                completeExercise(exercise)
+            },
+            onDisableDaily: {
+                selectedExercise = nil
+                publishDayState()
+            },
+            onDelete: {
+                selectedExercise = nil
+                publishDayState()
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func createExerciseSheet() -> some View {
+        CreateExerciseView(nextSortIndex: (allExercises.map(\.sortIndex).max() ?? -1) + 1)
+    }
+
+    @ViewBuilder
+    private func historySheet() -> some View {
+        HistoryView(exercises: dailyExercises, records: records)
+    }
+
+    @ViewBuilder
+    private func dayCompleteSheet() -> some View {
+        DayCompletePrompt(
+            exerciseCount: exercises.count,
+            onAddMore: { showDayCompletePrompt = false },
+            onLock: {
+                lockDay()
+                showDayCompletePrompt = false
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func milestoneSheet() -> some View {
+        if let milestone = pendingMilestone {
+            MilestoneView(profile: profile, milestone: milestone)
         }
-        .onAppear {
-            publishDayState()
-            checkMilestoneUnlock()
-            if allDone && !isLockedToday && !showMilestoneUnlock {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    if !showMilestoneUnlock && !isLockedToday {
-                        showDayCompletePrompt = true
-                    }
+    }
+
+    // MARK: - Lifecycle handlers
+
+    private func handleMinuteTick(_ now: Date) {
+        today = now
+        checkMilestoneUnlock()
+    }
+
+    private func handleAppear() {
+        publishDayState()
+        checkMilestoneUnlock()
+
+        if !isLockedToday && !meetsMinimum && !allExercises.isEmpty {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                if !isLockedToday && !meetsMinimum {
+                    showMinimumAlert = true
                 }
             }
+            return
         }
-        .onChange(of: allDone) { _, newValue in
-            publishDayState()
-            if newValue && !isLockedToday && !showMilestoneUnlock && activeSession == nil {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    if !showMilestoneUnlock && !isLockedToday {
-                        showDayCompletePrompt = true
-                    }
+
+        if allDone && !isLockedToday && !showMilestoneUnlock {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                if !showMilestoneUnlock && !isLockedToday {
+                    showDayCompletePrompt = true
                 }
-            }
-        }
-        .onChange(of: isLockedToday) { _, _ in publishDayState() }
-        .onChange(of: exercises.count) { _, _ in publishDayState() }
-        .sheet(item: $selectedExercise) { exercise in
-            ExerciseDetailSheet(
-                exercise: exercise,
-                onStart: {
-                    selectedExercise = nil
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                        activeSession = exercise
-                    }
-                },
-                onComplete: {
-                    selectedExercise = nil
-                    completeExercise(exercise)
-                }
-            )
-        }
-        .sheet(isPresented: $showCreateExercise) {
-            CreateExerciseView(nextSortIndex: (allExercises.map(\.sortIndex).max() ?? -1) + 1)
-        }
-        .sheet(isPresented: $showHistory) {
-            HistoryView(exercises: dailyExercises, records: records)
-        }
-        .sheet(isPresented: $showDayCompletePrompt) {
-            DayCompletePrompt(
-                exerciseCount: exercises.count,
-                onAddMore: { showDayCompletePrompt = false },
-                onLock: {
-                    lockDay()
-                    showDayCompletePrompt = false
-                }
-            )
-        }
-        .sheet(isPresented: $showMilestoneUnlock) {
-            if let milestone = milestones.first(where: {
-                $0.completedAt == nil && $0.day == nextMilestoneDay - 30
-            }) {
-                MilestoneView(profile: profile, milestone: milestone)
             }
         }
     }
+
+    private func handleAllDoneChange(_ oldValue: Bool, _ newValue: Bool) {
+        publishDayState()
+        if newValue && !isLockedToday && !showMilestoneUnlock && activeSession == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                if !showMilestoneUnlock && !isLockedToday {
+                    showDayCompletePrompt = true
+                }
+            }
+        }
+    }
+
+    private func handleExerciseCountChange(_ oldValue: Int, _ newValue: Int) {
+        publishDayState()
+    }
+
+    // MARK: - Main content
 
     private var mainContent: some View {
         VStack(spacing: 0) {
@@ -173,9 +288,7 @@ struct TodayView: View {
 
             streakBadge
 
-            Button {
-                PreferencesOpener.open()
-            } label: {
+            Button(action: PreferencesOpener.open) {
                 Image(systemName: "gearshape")
                     .font(.title3)
                     .foregroundStyle(.secondary)
@@ -214,13 +327,41 @@ struct TodayView: View {
         } else if isLockedToday {
             lockedState
         } else {
-            VStack(spacing: 0) {
-                if allDone {
-                    allDoneBanner
-                }
-                exerciseList
-            }
+            activeState
         }
+    }
+
+    private var activeState: some View {
+        VStack(spacing: 0) {
+            if !meetsMinimum {
+                minimumNotMetBanner
+            } else if allDone {
+                allDoneBanner
+            }
+            exerciseList
+        }
+    }
+
+    private var minimumNotMetBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Add \(remainingToMinimum) more exercise\(remainingToMinimum == 1 ? "" : "s")")
+                    .font(.headline)
+                Text("You need at least \(minimumExercises) exercises per day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Add Exercise") { showCreateExercise = true }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(Color.orange.opacity(0.12))
     }
 
     private var emptyState: some View {
@@ -230,9 +371,7 @@ struct TodayView: View {
                 .foregroundStyle(.secondary)
             Text("No exercises today")
                 .font(.title2.bold())
-            Text(allExercises.isEmpty
-                 ? "Add your first exercise. Once saved, its reps and sets are locked in."
-                 : "No daily exercises are set up. Add one to start a streak.")
+            Text("Set up at least \(minimumExercises) exercises to begin your daily routine.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 380)
@@ -255,6 +394,16 @@ struct TodayView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.top, 4)
+
+            #if DEBUG
+            Button {
+                showManageExercises = true
+            } label: {
+                Label("Manage Exercises", systemImage: "slider.horizontal.3")
+            }
+            .buttonStyle(.bordered)
+            .padding(.top, 16)
+            #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
@@ -285,29 +434,40 @@ struct TodayView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(exercises) { exercise in
-                    ExerciseCard(
-                        exercise: exercise,
-                        isDone: completedToday.contains(exercise.id)
-                    )
-                    .onTapGesture {
-                        if !completedToday.contains(exercise.id) {
-                            selectedExercise = exercise
-                        }
-                    }
+                    exerciseRow(exercise)
                 }
             }
             .padding(20)
         }
     }
 
+    @ViewBuilder
+    private func exerciseRow(_ exercise: Exercise) -> some View {
+        let isDone = completedToday.contains(exercise.id)
+        ExerciseCard(exercise: exercise, isDone: isDone)
+            .onTapGesture {
+                selectedExercise = exercise
+            }
+    }
+
     // MARK: - Footer
 
     private var footer: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button { showHistory = true } label: {
                 Label("History", systemImage: "clock.arrow.circlepath")
             }
             .buttonStyle(.bordered)
+
+            #if DEBUG
+            Button(role: .destructive) {
+                showResetConfirmation = true
+            } label: {
+                Label("Reset", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.bordered)
+            .help("Erase everything and start over")
+            #endif
 
             Spacer()
 
@@ -354,6 +514,10 @@ struct TodayView: View {
     }
 
     private func lockDay() {
+        guard meetsMinimum else {
+            showMinimumAlert = true
+            return
+        }
         let key = DayLogic.dayKey()
         guard !dayLocks.contains(where: { $0.dayKey == key }) else { return }
         context.insert(DayLock(dayKey: key))
@@ -374,6 +538,39 @@ struct TodayView: View {
             showMilestoneUnlock = true
         }
     }
+
+    // MARK: - Reset (DEBUG ONLY)
+
+    #if DEBUG
+    private func resetEverything() {
+        OverlayEnforcer.shared.stop()
+
+        deleteAll(Exercise.self)
+        deleteAll(CompletionRecord.self)
+        deleteAll(DayLock.self)
+        deleteAll(Milestone.self)
+        deleteAll(UserProfile.self)
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ Reset save failed: \(error)")
+        }
+
+        DayState.shared.allDone = false
+        DayState.shared.isLocked = false
+        DayState.shared.exerciseCount = 0
+        DayState.shared.dayKey = DayLogic.dayKey()
+    }
+
+    private func deleteAll<T: PersistentModel>(_ type: T.Type) {
+        let descriptor = FetchDescriptor<T>()
+        guard let items = try? context.fetch(descriptor) else { return }
+        for item in items {
+            context.delete(item)
+        }
+    }
+    #endif
 }
 
 // MARK: - Day Complete Prompt

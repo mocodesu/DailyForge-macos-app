@@ -9,6 +9,8 @@ struct MilestoneView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    private var unitSystem: UnitSystem { UserDefaults.standard.unitSystem }
+
     @State private var weightText = ""
     @State private var notes = ""
     @State private var frontItem: PhotosPickerItem?
@@ -18,106 +20,120 @@ struct MilestoneView: View {
     @State private var aiSummary: String?
     @State private var isAnalyzing = false
     @State private var aiError: String?
+    @State private var errorMessage: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("\(milestone.day)-Day Milestone").font(.largeTitle.bold())
-                    Text("You've been consistent. Time to reflect.")
-                        .foregroundStyle(.secondary)
-                }
-
-                GroupBox("Weight") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Started at").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.1f kg", profile.initialWeightKg))
-                                .monospacedDigit()
-                        }
-                        HStack {
-                            Text("Goal").foregroundStyle(.secondary)
-                            Spacer()
-                            Text(String(format: "%.1f kg", profile.goalWeightKg))
-                                .monospacedDigit()
-                        }
-                        HStack {
-                            Text("Today").foregroundStyle(.secondary)
-                            Spacer()
-                            TextField("kg", text: $weightText)
-                                .frame(width: 100)
-                                .textFieldStyle(.roundedBorder)
-                                .multilineTextAlignment(.trailing)
-                        }
-                    }
-                    .padding(8)
-                }
-
-                GroupBox("Photos") {
-                    HStack(spacing: 20) {
-                        photoColumn(
-                            label: "Day 1",
-                            data: profile.initialFrontPhoto,
-                            pickerItem: nil,
-                            pickerData: nil
-                        )
-                        photoColumn(
-                            label: "Today",
-                            data: frontData,
-                            pickerItem: $frontItem,
-                            pickerData: $frontData
-                        )
-                        Spacer()
-                    }
-                    .padding(8)
-                }
-
-                GroupBox("How do you feel?") {
-                    TextField("Notes about your progress…", text: $notes, axis: .vertical)
-                        .lineLimit(4...8)
-                        .padding(8)
-                }
-
-                if let aiSummary {
-                    GroupBox("Your reflection") {
-                        Text(aiSummary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
-                    }
-                }
-
-                if let aiError {
-                    Text(aiError).foregroundStyle(.red).font(.callout)
-                }
-
-                HStack {
-                    Button("Later") { dismiss() }
-                    Spacer()
-                    Button {
-                        generateReflection()
-                    } label: {
-                        if isAnalyzing {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Label("Generate Reflection", systemImage: "sparkles")
-                        }
-                    }
-                    .disabled(isAnalyzing || weightText.isEmpty)
-                    .buttonStyle(.bordered)
-
-                    Button("Save Milestone") { save() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(weightText.isEmpty)
-                        .keyboardShortcut(.defaultAction)
-                }
+                header
+                weightBox
+                photosBox
+                notesBox
+                if let aiSummary { reflectionBox(aiSummary) }
+                if let aiError { Text(aiError).foregroundStyle(.red).font(.callout) }
+                if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.callout) }
+                actionsRow
             }
             .padding(28)
         }
-        .frame(width: 620, height: 720)
+        .frame(width: 640, height: 740)
         .onAppear {
             notes = milestone.userNotes
-            if let w = milestone.currentWeightKg { weightText = String(format: "%.1f", w) }
+            if let w = milestone.currentWeightKg {
+                weightText = UnitConversion.formatWeight(w, unit: unitSystem)
+            }
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("\(milestone.day)-Day Milestone").font(.largeTitle.bold())
+            Text("You've been consistent. Time to reflect.")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var weightBox: some View {
+        GroupBox("Weight") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Started at").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(UnitConversion.formatWeight(profile.initialWeightKg, unit: unitSystem) + " \(unitSystem.weightUnitLabel)")
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Goal").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(UnitConversion.formatWeight(profile.goalWeightKg, unit: unitSystem) + " \(unitSystem.weightUnitLabel)")
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Height").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(UnitConversion.formatHeight(profile.initialHeightCm, unit: unitSystem))
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Today (\(unitSystem.weightUnitLabel))").foregroundStyle(.secondary)
+                    Spacer()
+                    TextField("", text: $weightText)
+                        .frame(width: 100)
+                        .textFieldStyle(.roundedBorder)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private var photosBox: some View {
+        GroupBox("Photos") {
+            HStack(spacing: 20) {
+                photoColumn(label: "Day 1", data: profile.initialFrontPhoto, pickerItem: nil, pickerData: nil)
+                photoColumn(label: "Today", data: frontData, pickerItem: $frontItem, pickerData: $frontData)
+                Spacer()
+            }
+            .padding(8)
+        }
+    }
+
+    private var notesBox: some View {
+        GroupBox("How do you feel?") {
+            TextField("Notes about your progress…", text: $notes, axis: .vertical)
+                .lineLimit(4...8)
+                .padding(8)
+        }
+    }
+
+    private func reflectionBox(_ text: String) -> some View {
+        GroupBox("Your reflection") {
+            Text(text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+        }
+    }
+
+    private var actionsRow: some View {
+        HStack {
+            Button("Later") { dismiss() }
+            Spacer()
+            Button {
+                generateReflection()
+            } label: {
+                if isAnalyzing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Generate Reflection", systemImage: "sparkles")
+                }
+            }
+            .disabled(isAnalyzing || weightText.isEmpty)
+            .buttonStyle(.bordered)
+
+            Button("Save Milestone") { save() }
+                .buttonStyle(.borderedProminent)
+                .disabled(weightText.isEmpty)
+                .keyboardShortcut(.defaultAction)
         }
     }
 
@@ -158,14 +174,18 @@ struct MilestoneView: View {
         }
     }
 
+    // MARK: - Actions
+
     private func generateReflection() {
-        guard let current = Double(weightText) else { return }
+        guard let currentValue = Double(weightText), currentValue > 0 else { return }
+        let currentKg = UnitConversion.displayToKg(currentValue, unit: unitSystem)
+
         isAnalyzing = true
         aiError = nil
         aiSummary = nil
 
         Task {
-            let delta = current - profile.initialWeightKg
+            let delta = currentKg - profile.initialWeightKg
             let deltaText = String(format: "%.1f kg", abs(delta))
             let direction = delta < 0 ? "lost" : (delta > 0 ? "gained" : "maintained")
 
@@ -175,7 +195,7 @@ struct MilestoneView: View {
             Facts:
             - Starting weight: \(String(format: "%.1f", profile.initialWeightKg)) kg
             - Goal weight: \(String(format: "%.1f", profile.goalWeightKg)) kg
-            - Current weight: \(String(format: "%.1f", current)) kg
+            - Current weight: \(String(format: "%.1f", currentKg)) kg
             - They have \(direction) \(deltaText) since starting.
             - Their personal notes: "\(notes)"
 
@@ -198,8 +218,20 @@ struct MilestoneView: View {
     }
 
     private func save() {
-        guard let current = Double(weightText) else { return }
-        milestone.currentWeightKg = current
+        guard let value = Double(weightText), value > 0 else {
+            errorMessage = "Please enter a valid weight."
+            return
+        }
+        let kg = UnitConversion.displayToKg(value, unit: unitSystem)
+
+        guard UnitConversion.weightRangeKg.contains(kg) else {
+            let r = UnitConversion.displayedWeightRange(unit: unitSystem)
+            errorMessage = "Weight must be between \(r.min) and \(r.max) \(unitSystem.weightUnitLabel)."
+            return
+        }
+
+        errorMessage = nil
+        milestone.currentWeightKg = kg
         milestone.userNotes = notes
         milestone.currentFrontPhoto = frontData ?? milestone.currentFrontPhoto
         milestone.currentSidePhoto = sideData ?? milestone.currentSidePhoto

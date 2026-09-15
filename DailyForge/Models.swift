@@ -32,7 +32,7 @@ final class Exercise {
     var sets: Int
     var durationSeconds: Int
     var sessionDurationSeconds: Int
-    var isDaily: Bool                // ← new: repeat every day?
+    var isDaily: Bool
     var notes: String
     var createdAt: Date
     var sortIndex: Int
@@ -104,15 +104,22 @@ final class UserProfile {
     var startDate: Date
     var initialWeightKg: Double
     var goalWeightKg: Double
+    var initialHeightCm: Double           // ← new: always stored in cm internally
     @Attribute(.externalStorage) var initialFrontPhoto: Data?
     @Attribute(.externalStorage) var initialSidePhoto: Data?
 
-    init(displayName: String, initialWeightKg: Double, goalWeightKg: Double) {
+    init(
+        displayName: String,
+        initialWeightKg: Double,
+        goalWeightKg: Double,
+        initialHeightCm: Double
+    ) {
         self.id = UUID()
         self.displayName = displayName
         self.startDate = Date()
         self.initialWeightKg = initialWeightKg
         self.goalWeightKg = goalWeightKg
+        self.initialHeightCm = initialHeightCm
     }
 }
 

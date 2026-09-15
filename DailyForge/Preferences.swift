@@ -14,47 +14,162 @@ enum PreferenceKeys {
     static let gracePeriod = "gracePeriod"
     static let checkCaptivePortal = "checkCaptivePortal"
 
-    // Enforcement
     static let reminderEnabled = "reminderEnabled"
     static let reminderTimeSeconds = "reminderTimeSeconds"
     static let graceMinutes = "graceMinutes"
     static let enforceKiosk = "enforceKiosk"
     static let fallbackAlertEnabled = "fallbackAlertEnabled"
 
-    // Overlay appearance
     static let overlayColorHex = "overlayColorHex"
     static let overlayMinOpacity = "overlayMinOpacity"
     static let overlayMaxOpacity = "overlayMaxOpacity"
     static let overlayPulseSeconds = "overlayPulseSeconds"
+
+    /// "metric" or "imperial"
+    static let unitSystem = "unitSystem"
 }
 
 struct Preferences {
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
-            PreferenceKeys.flashDuration: 2.0,
-            PreferenceKeys.borderWidth: 12.0,
-            PreferenceKeys.connectedColorHex: "#34C759",
-            PreferenceKeys.disconnectedColorHex: "#FF3B30",
-            PreferenceKeys.captivePortalColorHex: "#FF9500",
             PreferenceKeys.showNotifications: true,
             PreferenceKeys.playSounds: false,
-            PreferenceKeys.showOnAllScreens: true,
-            PreferenceKeys.gracePeriod: 2.5,
-            PreferenceKeys.checkCaptivePortal: true,
+            PreferenceKeys.fallbackAlertEnabled: true,
 
             PreferenceKeys.reminderEnabled: false,
             PreferenceKeys.reminderTimeSeconds: 19 * 3600,
             PreferenceKeys.graceMinutes: 15,
             PreferenceKeys.enforceKiosk: true,
-            PreferenceKeys.fallbackAlertEnabled: true,
 
             PreferenceKeys.overlayColorHex: "#FF3B30",
             PreferenceKeys.overlayMinOpacity: 0.12,
             PreferenceKeys.overlayMaxOpacity: 0.30,
-            PreferenceKeys.overlayPulseSeconds: 1.4
+            PreferenceKeys.overlayPulseSeconds: 1.4,
+
+            PreferenceKeys.unitSystem: UnitSystem.metric.rawValue
         ])
     }
 }
+
+// MARK: - Unit System
+
+enum UnitSystem: String, CaseIterable, Identifiable {
+    case metric
+    case imperial
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .metric: return "Metric"
+        case .imperial: return "Imperial"
+        }
+    }
+
+    var pickerLabel: String {
+        switch self {
+        case .metric: return "Metric (kg, cm)"
+        case .imperial: return "Imperial (lb, ft/in)"
+        }
+    }
+
+    var weightUnitLabel: String {
+        switch self {
+        case .metric: return "kg"
+        case .imperial: return "lb"
+        }
+    }
+
+    var heightUnitLabel: String {
+        switch self {
+        case .metric: return "cm"
+        case .imperial: return "ft/in"
+        }
+    }
+}
+
+// MARK: - Unit Conversion
+
+enum UnitConversion {
+    static let lbPerKg = 2.2046226218
+    static let cmPerInch = 2.54
+    static let inchesPerFoot = 12.0
+
+    /// Internal kg → user-displayed weight value (kg or lb).
+    static func kgToDisplay(_ kg: Double, unit: UnitSystem) -> Double {
+        unit == .metric ? kg : kg * lbPerKg
+    }
+
+    /// User-entered weight value → internal kg.
+    static func displayToKg(_ value: Double, unit: UnitSystem) -> Double {
+        unit == .metric ? value : value / lbPerKg
+    }
+
+    static func cmToFeetInches(_ cm: Double) -> (feet: Int, inches: Double) {
+        let totalInches = cm / cmPerInch
+        let feet = Int(floor(totalInches / inchesPerFoot))
+        let inches = totalInches - Double(feet) * inchesPerFoot
+        return (feet, inches)
+    }
+
+    static func feetInchesToCm(feet: Int, inches: Double) -> Double {
+        (Double(feet) * inchesPerFoot + inches) * cmPerInch
+    }
+
+    static func formatWeight(_ kg: Double, unit: UnitSystem) -> String {
+        String(format: "%.1f", kgToDisplay(kg, unit: unit))
+    }
+
+    static func formatHeight(_ cm: Double, unit: UnitSystem) -> String {
+        switch unit {
+        case .metric:
+            return String(format: "%.0f cm", cm)
+        case .imperial:
+            let (feet, inches) = cmToFeetInches(cm)
+            return String(format: "%d'%.0f\"", feet, inches.rounded())
+        }
+    }
+
+    /// Weight ranges in internal kg (30 – 300 kg). Conversions happen per unit.
+    static let weightRangeKg: ClosedRange<Double> = 30...300
+
+    /// Height ranges in internal cm (120 – 250 cm).
+    static let heightRangeCm: ClosedRange<Double> = 120...250
+
+    /// Human-readable range for validation error messages.
+    static func displayedWeightRange(unit: UnitSystem) -> (min: Int, max: Int) {
+        let min = Int(kgToDisplay(weightRangeKg.lowerBound, unit: unit).rounded())
+        let max = Int(kgToDisplay(weightRangeKg.upperBound, unit: unit).rounded())
+        return (min, max)
+    }
+
+    static func displayedHeightRange(unit: UnitSystem) -> (min: String, max: String) {
+        switch unit {
+        case .metric:
+            return ("\(Int(heightRangeCm.lowerBound)) cm",
+                    "\(Int(heightRangeCm.upperBound)) cm")
+        case .imperial:
+            return (formatHeight(heightRangeCm.lowerBound, unit: .imperial),
+                    formatHeight(heightRangeCm.upperBound, unit: .imperial))
+        }
+    }
+}
+
+// MARK: - UserDefaults helper
+
+extension UserDefaults {
+    var unitSystem: UnitSystem {
+        get {
+            let raw = string(forKey: PreferenceKeys.unitSystem) ?? UnitSystem.metric.rawValue
+            return UnitSystem(rawValue: raw) ?? .metric
+        }
+        set {
+            set(newValue.rawValue, forKey: PreferenceKeys.unitSystem)
+        }
+    }
+}
+
+// MARK: - Color hex helpers
 
 extension Color {
     init(hex: String) {

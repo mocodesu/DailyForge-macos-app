@@ -96,22 +96,58 @@ struct ExerciseCard: View {
 
 struct ExerciseDetailSheet: View {
     let exercise: Exercise
+    let isCompletedToday: Bool
     var onStart: () -> Void
     var onComplete: () -> Void
+    var onDisableDaily: () -> Void
+    var onDelete: () -> Void
 
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+
+    @State private var showDisableConfirmation = false
+    @State private var showDeleteConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             header
             statsRow
             sessionPanel
+            dailyToggle
             if !exercise.notes.isEmpty { notesPanel }
             Spacer(minLength: 0)
             actions
         }
         .padding(28)
-        .frame(width: 500, height: 540)
+        .frame(width: 520, height: sheetHeight)
+        .confirmationDialog(
+            "Stop repeating this exercise every day?",
+            isPresented: $showDisableConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Stop Repeating", role: .destructive) { disableDaily() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("\"\(exercise.name)\" will disappear from your daily list immediately. You can turn it back on at any time from this same sheet.")
+        }
+        .confirmationDialog(
+            "Delete this exercise?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Forever", role: .destructive) { deleteExercise() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("\"\(exercise.name)\" and its entire completion history will be removed. This cannot be undone.")
+        }
+    }
+
+    private var sheetHeight: CGFloat {
+        #if DEBUG
+        return isCompletedToday ? 600 : 660
+        #else
+        return isCompletedToday ? 500 : 560
+        #endif
     }
 
     private var header: some View {
@@ -195,6 +231,42 @@ struct ExerciseDetailSheet: View {
         }
     }
 
+    private var dailyToggle: some View {
+        GroupBox {
+            HStack(spacing: 12) {
+                Image(systemName: exercise.isDaily ? "repeat" : "1.circle")
+                    .font(.title2)
+                    .foregroundStyle(exercise.isDaily ? .blue : .orange)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Repeat every day")
+                        .font(.callout.weight(.medium))
+                    Text(exercise.isDaily
+                         ? "Turn off to remove this exercise from your daily list."
+                         : "This exercise is no longer part of your daily routine.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Toggle("", isOn: Binding(
+                    get: { exercise.isDaily },
+                    set: { newValue in
+                        if newValue {
+                            enableDaily()
+                        } else {
+                            showDisableConfirmation = true
+                        }
+                    }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+            .padding(8)
+        }
+    }
+
     private var notesPanel: some View {
         GroupBox("Notes") {
             Text(exercise.notes)
@@ -205,18 +277,41 @@ struct ExerciseDetailSheet: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
-            Button {
-                onStart()
+            if isCompletedToday {
+                HStack {
+                    Label("Completed today", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button("Close") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                }
+            } else {
+                Button {
+                    onStart()
+                } label: {
+                    Label("Start Workout", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+
+                Button("Not yet") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+
+            #if DEBUG
+            Divider()
+                .padding(.vertical, 4)
+
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
             } label: {
-                Label("Start Workout", systemImage: "play.fill")
+                Label("Delete Exercise", systemImage: "trash")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-
-            Button("Not yet") { dismiss() }
-                .keyboardShortcut(.cancelAction)
+            .buttonStyle(.bordered)
+            #endif
         }
     }
 
@@ -226,7 +321,200 @@ struct ExerciseDetailSheet: View {
             Text(label).font(.caption).foregroundStyle(.secondary)
         }
     }
+
+    // MARK: - Mutations
+
+    private func disableDaily() {
+        exercise.isDaily = false
+        if let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date()) {
+            exercise.createdAt = yesterday
+        }
+        try? context.save()
+        onDisableDaily()
+        dismiss()
+    }
+
+    private func enableDaily() {
+        exercise.isDaily = true
+        try? context.save()
+    }
+
+    private func deleteExercise() {
+        let id = exercise.id
+        let descriptor = FetchDescriptor<CompletionRecord>(
+            predicate: #Predicate { $0.exerciseID == id }
+        )
+        if let records = try? context.fetch(descriptor) {
+            for record in records {
+                context.delete(record)
+            }
+        }
+        context.delete(exercise)
+        try? context.save()
+        onDelete()
+        dismiss()
+    }
 }
+
+// MARK: - Manage Exercises (DEBUG ONLY)
+
+#if DEBUG
+struct ManageExercisesView: View {
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+
+    @Query(sort: \Exercise.sortIndex) private var exercises: [Exercise]
+
+    @State private var pendingDeletion: Exercise?
+    @State private var showCreateExercise = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            listContent
+        }
+        .frame(width: 540, height: 620)
+        .sheet(isPresented: $showCreateExercise) {
+            CreateExerciseView(nextSortIndex: nextSortIndex)
+        }
+        .confirmationDialog(
+            "Delete this exercise?",
+            isPresented: Binding(
+                get: { pendingDeletion != nil },
+                set: { if !$0 { pendingDeletion = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDeletion
+        ) { exercise in
+            Button("Delete Forever", role: .destructive) {
+                deleteExercise(exercise)
+                pendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeletion = nil }
+        } message: { exercise in
+            Text("\"\(exercise.name)\" and its entire completion history will be removed. This cannot be undone.")
+        }
+    }
+
+    private var nextSortIndex: Int {
+        (exercises.map(\.sortIndex).max() ?? -1) + 1
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Manage Exercises").font(.title2.bold())
+                Text("\(exercises.count) exercise\(exercises.count == 1 ? "" : "s") • Delete or add more.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                showCreateExercise = true
+            } label: {
+                Label("Add Exercise", systemImage: "plus")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            Button("Close") { dismiss() }
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder
+    private var listContent: some View {
+        if exercises.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "tray")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.secondary)
+                Text("No exercises yet")
+                    .foregroundStyle(.secondary)
+                Button {
+                    showCreateExercise = true
+                } label: {
+                    Label("Create Exercise", systemImage: "plus")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                ForEach(exercises) { exercise in
+                    ManageRow(exercise: exercise) {
+                        pendingDeletion = exercise
+                    }
+                }
+            }
+            .listStyle(.inset)
+        }
+    }
+
+    private func deleteExercise(_ exercise: Exercise) {
+        let id = exercise.id
+        let descriptor = FetchDescriptor<CompletionRecord>(
+            predicate: #Predicate { $0.exerciseID == id }
+        )
+        if let records = try? context.fetch(descriptor) {
+            for record in records {
+                context.delete(record)
+            }
+        }
+        context.delete(exercise)
+        try? context.save()
+    }
+}
+
+private struct ManageRow: View {
+    let exercise: Exercise
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: exercise.exerciseType.icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(exercise.name).font(.body.weight(.medium))
+                    if !exercise.isDaily {
+                        Text("ONE-OFF")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.18))
+                            .foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Delete \(exercise.name)")
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var summary: String {
+        switch exercise.exerciseType {
+        case .reps:
+            return "\(exercise.sets) sets × \(exercise.reps) reps • \(exercise.bodyParts.joined(separator: ", "))"
+        case .timer:
+            return "\(exercise.sets) sets × \(formatDuration(exercise.durationSeconds)) • \(exercise.bodyParts.joined(separator: ", "))"
+        }
+    }
+}
+#endif
 
 // MARK: - Workout Session
 
@@ -362,6 +650,9 @@ struct CreateExerciseView: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
+    @State private var offset = 0
+    @State private var justSavedCount = 0
+
     @State private var name = ""
     @State private var selectedBodyParts: Set<String> = []
     @State private var exerciseType: ExerciseType = .reps
@@ -389,136 +680,11 @@ struct CreateExerciseView: View {
             VStack(alignment: .leading, spacing: 20) {
                 header
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 16) {
-                        TextField("Exercise name", text: $name)
-                            .textFieldStyle(.roundedBorder)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Type").font(.caption).foregroundStyle(.secondary)
-                            Picker("", selection: $exerciseType) {
-                                ForEach(ExerciseType.allCases) { type in
-                                    Label(type.displayName, systemImage: type.icon).tag(type)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                            .labelsHidden()
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            Toggle(isOn: $isDaily) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Repeat every day")
-                                        .font(.callout.weight(.medium))
-                                    Text(isDaily
-                                         ? "This exercise will appear fresh every day."
-                                         : "This exercise will only appear today, then retire.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .toggleStyle(.switch)
-                        }
-                        .padding(.vertical, 4)
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack {
-                                Text("Body parts").font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                if !selectedBodyParts.isEmpty {
-                                    Button("Clear") { selectedBodyParts.removeAll() }
-                                        .buttonStyle(.link)
-                                        .font(.caption)
-                                }
-                            }
-                            FlowLayout(spacing: 6) {
-                                ForEach(allBodyParts, id: \.self) { part in
-                                    BodyPartChip(
-                                        label: part,
-                                        isSelected: selectedBodyParts.contains(part)
-                                    ) {
-                                        toggleBodyPart(part)
-                                    }
-                                }
-                            }
-                        }
-
-                        HStack {
-                            Text("Sets")
-                            Spacer()
-                            TextField("", text: $setsText)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 80)
-                                .multilineTextAlignment(.trailing)
-                        }
-
-                        switch exerciseType {
-                        case .reps:
-                            HStack {
-                                Text("Reps per set")
-                                Spacer()
-                                TextField("", text: $repsText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.trailing)
-                            }
-
-                        case .timer:
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Seconds per set")
-                                    Spacer()
-                                    TextField("", text: $durationText)
-                                        .textFieldStyle(.roundedBorder)
-                                        .frame(width: 80)
-                                        .multilineTextAlignment(.trailing)
-                                }
-                                HStack(spacing: 6) {
-                                    ForEach(quickPerSetDurations, id: \.self) { seconds in
-                                        Button(formatDuration(seconds)) {
-                                            durationText = "\(seconds)"
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                    }
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Session timer")
-                                        .font(.callout.weight(.medium))
-                                    Text("Total workout window. Once started, it cannot be stopped.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                TextField("", text: $sessionDurationText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 80)
-                                    .multilineTextAlignment(.trailing)
-                            }
-                            HStack(spacing: 6) {
-                                ForEach(quickSessionDurations, id: \.1) { label, seconds in
-                                    Button(label) {
-                                        sessionDurationText = "\(seconds)"
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
-
-                        TextField("Notes (optional)", text: $notes, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
-                            .lineLimit(3...6)
-                    }
-                    .padding(10)
+                if justSavedCount > 0 {
+                    savedBanner
                 }
+
+                formBox
 
                 Toggle(isOn: $confirmLock) {
                     Text("I understand this exercise is permanent and cannot be changed.")
@@ -529,27 +695,189 @@ struct CreateExerciseView: View {
                     Text(errorMessage).foregroundStyle(.red).font(.callout)
                 }
 
-                HStack {
-                    Button("Cancel") { dismiss() }
-                        .keyboardShortcut(.cancelAction)
-                    Spacer()
-                    Button("Save Exercise") { save() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!confirmLock)
-                        .keyboardShortcut(.defaultAction)
-                }
+                actionButtons
             }
             .padding(24)
         }
-        .frame(width: 560, height: 820)
+        .frame(width: 560, height: 860)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("New Exercise").font(.largeTitle.bold())
-            Text("Once saved, this exercise is locked in. No editing later.")
+            Text("Once saved, this exercise is locked in. You can still change the daily-repeat flag later.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var savedBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+            Text("\(justSavedCount) exercise\(justSavedCount == 1 ? "" : "s") saved. Keep going or close when done.")
+                .font(.callout)
+            Spacer()
+        }
+        .padding(10)
+        .background(Color.green.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var formBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 16) {
+                TextField("Exercise name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Type").font(.caption).foregroundStyle(.secondary)
+                    Picker("", selection: $exerciseType) {
+                        ForEach(ExerciseType.allCases) { type in
+                            Label(type.displayName, systemImage: type.icon).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle(isOn: $isDaily) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Repeat every day")
+                                .font(.callout.weight(.medium))
+                            Text(isDaily
+                                 ? "This exercise will appear fresh every day."
+                                 : "This exercise will only appear today, then retire.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text("Body parts").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if !selectedBodyParts.isEmpty {
+                            Button("Clear") { selectedBodyParts.removeAll() }
+                                .buttonStyle(.link)
+                                .font(.caption)
+                        }
+                    }
+                    FlowLayout(spacing: 6) {
+                        ForEach(allBodyParts, id: \.self) { part in
+                            BodyPartChip(
+                                label: part,
+                                isSelected: selectedBodyParts.contains(part)
+                            ) {
+                                toggleBodyPart(part)
+                            }
+                        }
+                    }
+                }
+
+                HStack {
+                    Text("Sets")
+                    Spacer()
+                    TextField("", text: $setsText)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .multilineTextAlignment(.trailing)
+                }
+
+                switch exerciseType {
+                case .reps:
+                    HStack {
+                        Text("Reps per set")
+                        Spacer()
+                        TextField("", text: $repsText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                            .multilineTextAlignment(.trailing)
+                    }
+
+                case .timer:
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Seconds per set")
+                            Spacer()
+                            TextField("", text: $durationText)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .multilineTextAlignment(.trailing)
+                        }
+                        HStack(spacing: 6) {
+                            ForEach(quickPerSetDurations, id: \.self) { seconds in
+                                Button(formatDuration(seconds)) {
+                                    durationText = "\(seconds)"
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Session timer")
+                                .font(.callout.weight(.medium))
+                            Text("Total workout window. Once started, it cannot be stopped.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        TextField("", text: $sessionDurationText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    HStack(spacing: 6) {
+                        ForEach(quickSessionDurations, id: \.1) { label, seconds in
+                            Button(label) {
+                                sessionDurationText = "\(seconds)"
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+                }
+
+                TextField("Notes (optional)", text: $notes, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(3...6)
+            }
+            .padding(10)
+        }
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 10) {
+            Button("Cancel") { dismiss() }
+                .keyboardShortcut(.cancelAction)
+
+            Spacer()
+
+            #if DEBUG
+            Button("Save & Add Another") {
+                save(stayOpen: true)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!confirmLock)
+            #endif
+
+            Button("Save Exercise") {
+                save(stayOpen: false)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!confirmLock)
+            .keyboardShortcut(.defaultAction)
         }
     }
 
@@ -561,7 +889,7 @@ struct CreateExerciseView: View {
         }
     }
 
-    private func save() {
+    private func save(stayOpen: Bool) {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { errorMessage = "Please enter a name."; return }
         guard !selectedBodyParts.isEmpty else { errorMessage = "Pick at least one body part."; return }
@@ -601,11 +929,30 @@ struct CreateExerciseView: View {
             sessionDurationSeconds: sessionDuration,
             isDaily: isDaily,
             notes: notes,
-            sortIndex: nextSortIndex
+            sortIndex: nextSortIndex + offset
         )
         context.insert(exercise)
         try? context.save()
-        dismiss()
+
+        errorMessage = nil
+
+        if stayOpen {
+            offset += 1
+            justSavedCount += 1
+            resetForNext()
+        } else {
+            dismiss()
+        }
+    }
+
+    private func resetForNext() {
+        name = ""
+        notes = ""
+        repsText = "10"
+        setsText = "3"
+        durationText = "30"
+        sessionDurationText = "60"
+        confirmLock = false
     }
 }
 
