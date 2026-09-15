@@ -10,9 +10,33 @@
 		D4F00CBA305980770078D100 /* DailyForge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DailyForge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		D4F00CFC3059968A0078D100 /* Exceptions for "DailyForge" folder in "DailyForge" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"install-login-item.sh",
+			);
+			target = D4F00CB9305980770078D100 /* DailyForge */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		D4F00CFD3059968A0078D100 /* Exceptions for "DailyForge" folder in "Compile Sources" phase from "DailyForge" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = D4F00CB6305980770078D100 /* Sources */;
+			membershipExceptions = (
+				"install-login-item.sh",
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		D4F00CBC305980770078D100 /* DailyForge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				D4F00CFC3059968A0078D100 /* Exceptions for "DailyForge" folder in "DailyForge" target */,
+				D4F00CFD3059968A0078D100 /* Exceptions for "DailyForge" folder in "Compile Sources" phase from "DailyForge" target */,
+			);
 			path = DailyForge;
 			sourceTree = "<group>";
 		};

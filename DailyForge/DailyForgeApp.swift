@@ -1,12 +1,17 @@
 import SwiftUI
 import SwiftData
+import AppKit
+import UserNotifications
 
 @main
 struct DailyForgeApp: App {
+    @NSApplicationDelegateAdaptor(DailyForgeAppDelegate.self) var appDelegate
     let container: ModelContainer
     let startupError: String?
 
     init() {
+        Preferences.registerDefaults()
+
         let schema = Schema([
             Exercise.self,
             CompletionRecord.self,
@@ -16,7 +21,6 @@ struct DailyForgeApp: App {
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
-        // First attempt: open the existing store
         do {
             self.container = try ModelContainer(for: schema, configurations: [config])
             self.startupError = nil
@@ -26,24 +30,18 @@ struct DailyForgeApp: App {
             print("⚠️ Wiping store and retrying…")
         }
 
-        // Second attempt: wipe the store, then retry
         Self.wipeStore()
 
         do {
             self.container = try ModelContainer(for: schema, configurations: [config])
             self.startupError = nil
         } catch {
-            // Third attempt: fall back to an in-memory container so the app
-            // still opens and can tell the user what's wrong.
             print("❌ Still failing after wipe: \(error)")
             let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
             if let memoryContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) {
                 self.container = memoryContainer
-                self.startupError = "Could not open the on-disk database. Running with temporary storage — changes will not be saved. \(error.localizedDescription)"
+                self.startupError = "Could not open the on-disk database. Running with temporary storage. \(error.localizedDescription)"
             } else {
-                // This is genuinely unrecoverable — the schema itself is broken.
-                // We cannot continue without a container, so this is one of the
-                // very few legitimate uses of fatalError.
                 fatalError("Schema is invalid: \(error)")
             }
         }
@@ -58,24 +56,25 @@ struct DailyForgeApp: App {
                     RootView()
                 }
             }
+            .onAppear {
+                DailyForgeAppDelegate.sharedContainer = container
+            }
         }
         .modelContainer(container)
         .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Preferences…") { PreferencesOpener.open() }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 
-    // MARK: - Store wiping
-
-    /// Deletes all files SwiftData/`CoreData` uses to back the default store.
-    /// Safe to call when the app has no open container yet.
     private static func wipeStore() {
         let fm = FileManager.default
-
-        // Non-sandboxed default location: ~/Library/Application Support/
         if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             removeStoreFiles(in: appSupport, named: "default", fm: fm)
         }
-
-        // Sandboxed container location (in case the app is ever sandboxed)
         if let bundleID = Bundle.main.bundleIdentifier {
             let containerURL = fm.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Containers")
@@ -86,18 +85,116 @@ struct DailyForgeApp: App {
     }
 
     private static func removeStoreFiles(in directory: URL, named base: String, fm: FileManager) {
-        let suffixes = ["", "-shm", "-wal"]
-        for suffix in suffixes {
+        for suffix in ["", "-shm", "-wal"] {
             let url = directory.appendingPathComponent("\(base).store\(suffix)")
             if fm.fileExists(atPath: url.path) {
-                do {
-                    try fm.removeItem(at: url)
-                    print("🗑️ Removed \(url.lastPathComponent)")
-                } catch {
-                    print("⚠️ Could not remove \(url.lastPathComponent): \(error)")
-                }
+                try? fm.removeItem(at: url)
             }
         }
+    }
+}
+
+// MARK: - Preferences Opener
+
+enum PreferencesOpener {
+    private static var controller: PreferencesWindowController?
+
+    static func open() {
+        if controller == nil {
+            controller = PreferencesWindowController()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        controller?.showWindow(nil)
+        controller?.window?.makeKeyAndOrderFront(nil)
+    }
+}
+
+// MARK: - AppDelegate
+
+class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+
+    static var sharedContainer: ModelContainer?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationManager.shared.bootstrap()
+        NotificationManager.shared.requestPermission()
+
+        EnforcementController.shared.start()
+        setupMenuBar()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            guard let container = DailyForgeAppDelegate.sharedContainer else { return }
+            EnforcementController.shared.handleLaunch(container: container)
+        }
+    }
+
+    /// Closing the last window must NOT terminate the app.
+    /// Without this override, macOS asks `applicationShouldTerminate` when
+    /// the last window closes, and our override returns `.terminateNow`
+    /// whenever the overlay is idle — which is why the red dot was quitting
+    /// the app.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return false
+    }
+
+    /// Blocks Cmd+Q and any other path that terminates the app while the
+    /// red overlay is active.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if OverlayEnforcer.shared.isActive {
+            NSSound(named: "Basso")?.play()
+            return .terminateCancel
+        }
+        return .terminateNow
+    }
+
+    // MARK: - Menu bar
+
+    private func setupMenuBar() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+
+        if let button = statusItem?.button {
+            button.image = NSImage(
+                systemSymbolName: "figure.strengthtraining.traditional",
+                accessibilityDescription: "DailyForge"
+            )
+        }
+
+        let menu = NSMenu()
+        menu.addItem(NSMenuItem(
+            title: "Open DailyForge",
+            action: #selector(openMainWindow),
+            keyEquivalent: "o"
+        ))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(
+            title: "Preferences…",
+            action: #selector(openPreferences),
+            keyEquivalent: ","
+        ))
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(
+            title: "Quit DailyForge",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
+
+        for item in menu.items {
+            item.target = self
+        }
+        statusItem?.menu = menu
+    }
+
+    @objc private func openMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        for window in NSApp.windows where window.level == .normal && window.canBecomeKey {
+            window.makeKeyAndOrderFront(nil)
+            break
+        }
+    }
+
+    @objc private func openPreferences() {
+        PreferencesOpener.open()
     }
 }
 
@@ -111,24 +208,16 @@ struct StartupErrorView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(.orange)
-
-            Text("Storage issue")
-                .font(.title.bold())
-
+            Text("Storage issue").font(.title.bold())
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: 420)
-
             HStack(spacing: 12) {
                 Button("Quit") { NSApp.terminate(nil) }
                     .keyboardShortcut(.cancelAction)
-
-                Button("Try Again") {
-                    // Quit — the next launch will retry the whole init sequence
-                    NSApp.terminate(nil)
-                }
-                .buttonStyle(.borderedProminent)
+                Button("Try Again") { NSApp.terminate(nil) }
+                    .buttonStyle(.borderedProminent)
             }
             .padding(.top, 8)
         }

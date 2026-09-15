@@ -215,13 +215,8 @@ struct ExerciseDetailSheet: View {
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
 
-            HStack {
-                Button("Not yet") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("Mark Done (skip timer)") { onComplete() }
-                    .buttonStyle(.bordered)
-            }
+            Button("Not yet") { dismiss() }
+                .keyboardShortcut(.cancelAction)
         }
     }
 
@@ -410,7 +405,6 @@ struct CreateExerciseView: View {
                             .labelsHidden()
                         }
 
-                        // Repeat schedule — the key new control
                         VStack(alignment: .leading, spacing: 6) {
                             Toggle(isOn: $isDaily) {
                                 VStack(alignment: .leading, spacing: 2) {
