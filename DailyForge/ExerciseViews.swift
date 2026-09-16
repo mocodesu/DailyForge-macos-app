@@ -682,6 +682,10 @@ struct CreateExerciseView: View {
     @State private var offset = 0
     @State private var justSavedCount = 0
 
+    // Catalog pre-fill
+    @State private var selectedCatalogName: String = ""
+
+    // Form fields
     @State private var name = ""
     @State private var selectedBodyParts: Set<String> = []
     @State private var exerciseType: ExerciseType = .reps
@@ -713,6 +717,7 @@ struct CreateExerciseView: View {
                     savedBanner
                 }
 
+                quickStartBox
                 formBox
 
                 Toggle(isOn: $confirmLock) {
@@ -728,8 +733,10 @@ struct CreateExerciseView: View {
             }
             .padding(24)
         }
-        .frame(width: 560, height: 860)
+        .frame(width: 580, height: 940)
     }
+
+    // MARK: - Sections
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -751,6 +758,85 @@ struct CreateExerciseView: View {
         .padding(10)
         .background(Color.green.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var quickStartBox: some View {
+        GroupBox("Quick Start") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Pick a common home workout to prefill every field below. You can still edit anything before saving.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Picker("Exercise", selection: $selectedCatalogName) {
+                        Text("None — start from scratch").tag("")
+                        ForEach(WorkoutCatalog.categories, id: \.self) { category in
+                            Section(category) {
+                                ForEach(WorkoutCatalog.byCategory(category)) { item in
+                                    Text(item.name).tag(item.name)
+                                }
+                            }
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .onChange(of: selectedCatalogName) { _, newValue in
+                        applyCatalog(newValue)
+                    }
+
+                    if !selectedCatalogName.isEmpty {
+                        Button("Clear") {
+                            selectedCatalogName = ""
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+
+                    Spacer()
+                }
+
+                if let item = WorkoutCatalog.item(named: selectedCatalogName) {
+                    catalogPreview(item)
+                }
+            }
+            .padding(6)
+        }
+    }
+
+    private func catalogPreview(_ item: CatalogExercise) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            FlowLayout(spacing: 6) {
+                ForEach(item.bodyParts, id: \.self) { part in
+                    Text(part)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor.opacity(0.15))
+                        .foregroundStyle(Color.accentColor)
+                        .clipShape(Capsule())
+                }
+            }
+            Text(metricLine(for: item))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(item.notes)
+                .font(.caption)
+                .italic()
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
+    }
+
+    private func metricLine(for item: CatalogExercise) -> String {
+        switch item.exerciseType {
+        case .reps:
+            return "\(item.sets) sets × \(item.reps) reps • session \(formatDuration(item.sessionSeconds))"
+        case .timer:
+            return "\(item.sets) sets × \(formatDuration(item.perSetSeconds)) • session \(formatDuration(item.sessionSeconds))"
+        }
     }
 
     private var formBox: some View {
@@ -893,13 +979,13 @@ struct CreateExerciseView: View {
 
             Spacer()
 
-            #if DEBUG
+           
             Button("Save & Add Another") {
                 save(stayOpen: true)
             }
             .buttonStyle(.bordered)
             .disabled(!confirmLock)
-            #endif
+           
 
             Button("Save Exercise") {
                 save(stayOpen: false)
@@ -908,6 +994,33 @@ struct CreateExerciseView: View {
             .disabled(!confirmLock)
             .keyboardShortcut(.defaultAction)
         }
+    }
+
+    // MARK: - Catalog apply
+
+    private func applyCatalog(_ catalogName: String) {
+        guard let item = WorkoutCatalog.item(named: catalogName) else { return }
+
+        name = item.name
+        selectedBodyParts = Set(item.bodyParts)
+        exerciseType = item.exerciseType
+        setsText = "\(item.sets)"
+        sessionDurationText = "\(item.sessionSeconds)"
+        notes = item.notes
+
+        switch item.exerciseType {
+        case .reps:
+            repsText = "\(item.reps)"
+            durationText = "30"
+        case .timer:
+            durationText = "\(item.perSetSeconds)"
+            repsText = "10"
+        }
+
+        errorMessage = nil
+        // Reset the confirmation toggle — the user hasn't reviewed the
+        // prefilled form yet.
+        confirmLock = false
     }
 
     private func toggleBodyPart(_ part: String) {
@@ -982,9 +1095,10 @@ struct CreateExerciseView: View {
         durationText = "30"
         sessionDurationText = "60"
         confirmLock = false
+        selectedCatalogName = ""
+        // Keep: exerciseType, isDaily, selectedBodyParts
     }
 }
-
 // MARK: - Reusable Chip
 
 struct BodyPartChip: View {
