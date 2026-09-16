@@ -304,6 +304,35 @@ struct ExerciseDetailSheet: View {
             Divider()
                 .padding(.vertical, 4)
 
+            // MARK: Debug shortcuts
+
+            if !isCompletedToday {
+                HStack(spacing: 8) {
+                    Button {
+                        onComplete()
+                    } label: {
+                        Label("Skip Timer & Mark Done", systemImage: "forward.end.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+
+                    Button {
+                        onStart()
+                        // Immediately complete after the session view appears
+                        // — this lets you test the flow visually without waiting.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            onComplete()
+                        }
+                    } label: {
+                        Label("Flash & Done", systemImage: "bolt.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                }
+            }
+
             Button(role: .destructive) {
                 showDeleteConfirmation = true
             } label: {

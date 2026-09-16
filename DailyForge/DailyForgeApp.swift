@@ -16,6 +16,7 @@ struct DailyForgeApp: App {
             Exercise.self,
             CompletionRecord.self,
             DayLock.self,
+            DailySwear.self,
             UserProfile.self,
             Milestone.self
         ])
@@ -129,26 +130,19 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Closing the last window must NOT terminate the app.
-    /// Without this override, macOS asks `applicationShouldTerminate` when
-    /// the last window closes, and our override returns `.terminateNow`
-    /// whenever the overlay is idle — which is why the red dot was quitting
-    /// the app.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return false
     }
 
-    /// Blocks Cmd+Q and any other path that terminates the app while the
-    /// red overlay is active.
+    /// Blocks Quit while the overlay is engaged OR while the swear sheet
+    /// is open. The user must finish the swear to escape.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if OverlayEnforcer.shared.isActive {
+        if OverlayEnforcer.shared.isActive || SwearSessionState.shared.isActive {
             NSSound(named: "Basso")?.play()
             return .terminateCancel
         }
         return .terminateNow
     }
-
-    // MARK: - Menu bar
 
     private func setupMenuBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -179,9 +173,7 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "q"
         ))
 
-        for item in menu.items {
-            item.target = self
-        }
+        for item in menu.items { item.target = self }
         statusItem?.menu = menu
     }
 

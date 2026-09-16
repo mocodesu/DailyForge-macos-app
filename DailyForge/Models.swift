@@ -97,6 +97,26 @@ final class DayLock {
     }
 }
 
+/// A voice-recorded oath that the day's exercises were genuinely completed.
+/// One per calendar day. Stored alongside the transcript of what the user
+/// said, so it can be reviewed later.
+@Model
+final class DailySwear {
+    var id: UUID
+    var dayKey: String
+    var swornAt: Date
+    var transcript: String
+    var matchedPhrase: String
+
+    init(dayKey: String, transcript: String, matchedPhrase: String) {
+        self.id = UUID()
+        self.dayKey = dayKey
+        self.swornAt = Date()
+        self.transcript = transcript
+        self.matchedPhrase = matchedPhrase
+    }
+}
+
 @Model
 final class UserProfile {
     var id: UUID
@@ -104,7 +124,7 @@ final class UserProfile {
     var startDate: Date
     var initialWeightKg: Double
     var goalWeightKg: Double
-    var initialHeightCm: Double           // ← new: always stored in cm internally
+    var initialHeightCm: Double
     @Attribute(.externalStorage) var initialFrontPhoto: Data?
     @Attribute(.externalStorage) var initialSidePhoto: Data?
 
@@ -137,8 +157,8 @@ final class Milestone {
 
     init(day: Int) {
         self.id = UUID()
-        self.day = day
         self.unlockedAt = Date()
+        self.day = day
         self.userNotes = ""
     }
 }

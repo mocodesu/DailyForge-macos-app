@@ -17,6 +17,7 @@
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "D4F00CB9305980770078D100"
                BuildableName = "DailyForge.app"
+               BlueprintName = "DailyForge"
                ReferencedContainer = "container:DailyForge.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -30,7 +31,7 @@
       shouldAutocreateTestPlan = "YES">
    </TestAction>
    <LaunchAction
-      buildConfiguration = "Release"
+      buildConfiguration = "Debug"
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       launchStyle = "0"
@@ -46,6 +47,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D4F00CB9305980770078D100"
             BuildableName = "DailyForge.app"
+            BlueprintName = "DailyForge"
             ReferencedContainer = "container:DailyForge.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -62,6 +64,7 @@
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "D4F00CB9305980770078D100"
             BuildableName = "DailyForge.app"
+            BlueprintName = "DailyForge"
             ReferencedContainer = "container:DailyForge.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -70,7 +73,7 @@
       buildConfiguration = "Debug">
    </AnalyzeAction>
    <ArchiveAction
-      buildConfiguration = "Release"
+      buildConfiguration = "Debug"
       revealArchiveInOrganizer = "YES">
    </ArchiveAction>
 </Scheme>

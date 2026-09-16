@@ -8,11 +8,9 @@ struct PreferencesView: View {
             EnforcementPreferences()
                 .tabItem { Label("Enforcement", systemImage: "lock.shield") }
         }
-        .frame(width: 560, height: 520)
+        .frame(width: 580, height: 620)
     }
 }
-
-// MARK: - Reminders
 
 struct RemindersPreferences: View {
     @AppStorage(PreferenceKeys.showNotifications) private var showNotifications = true
@@ -66,11 +64,6 @@ struct RemindersPreferences: View {
                         Button("Open System Settings") { notif.openSystemNotificationSettings() }
                             .controlSize(.small)
                     }
-
-                    Text("If the Test button does nothing, check that Focus mode is off and that DailyForge has \"Banners\" or \"Alerts\" enabled in System Settings → Notifications.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding()
@@ -78,8 +71,6 @@ struct RemindersPreferences: View {
         .onAppear { notif.refreshStatus() }
     }
 }
-
-// MARK: - Enforcement
 
 struct EnforcementPreferences: View {
     @AppStorage(PreferenceKeys.reminderEnabled) private var reminderEnabled = false
@@ -91,6 +82,10 @@ struct EnforcementPreferences: View {
     @AppStorage(PreferenceKeys.overlayMinOpacity) private var overlayMinOpacity: Double = 0.12
     @AppStorage(PreferenceKeys.overlayMaxOpacity) private var overlayMaxOpacity: Double = 0.30
     @AppStorage(PreferenceKeys.overlayPulseSeconds) private var overlayPulseSeconds: Double = 1.4
+
+    @AppStorage(PreferenceKeys.swearPhrase) private var swearPhrase: String = Preferences.defaultSwearPhrase
+    @State private var phraseDraft: String = ""
+    @State private var phraseError: String?
 
     private var reminderTimeBinding: Binding<Date> {
         Binding(
@@ -135,11 +130,6 @@ struct EnforcementPreferences: View {
                 Section("Enforcement") {
                     Toggle("Flash the screen if I ignore the reminder", isOn: $enforceKiosk)
                         .disabled(!reminderEnabled)
-
-                    Text("When enabled, DailyForge will cover your screen(s) with a pulsing overlay after the grace period. Clicking other apps is blocked; DailyForge stays in front. The lock releases when today's exercises are done.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Section("Overlay appearance") {
@@ -180,8 +170,65 @@ struct EnforcementPreferences: View {
                     }
                     .controlSize(.small)
                 }
+
+                Section("Swear phrase") {
+                    Text("The phrase you must say out loud to seal a completed day.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    TextField("Phrase", text: $phraseDraft, axis: .vertical)
+                        .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
+                        .onAppear {
+                            phraseDraft = swearPhrase
+                        }
+
+                    if let phraseError {
+                        Text(phraseError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    HStack {
+                        Button("Reset to Default") {
+                            phraseDraft = Preferences.defaultSwearPhrase
+                            phraseError = nil
+                        }
+                        .controlSize(.small)
+
+                        Spacer()
+
+                        Button("Save Phrase") {
+                            savePhrase()
+                        }
+                        .controlSize(.small)
+                        .disabled(phraseDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                                  || phraseDraft == swearPhrase)
+                    }
+                }
             }
             .padding()
         }
+    }
+
+    private func savePhrase() {
+        let trimmed = phraseDraft
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ")
+            .joined(separator: " ")   // collapse multiple spaces
+
+        let wordCount = trimmed.split(separator: " ").count
+        guard wordCount >= 3 else {
+            phraseError = "Phrase must be at least 3 words."
+            return
+        }
+        guard wordCount <= 40 else {
+            phraseError = "Phrase must be 40 words or fewer."
+            return
+        }
+
+        phraseError = nil
+        swearPhrase = trimmed
     }
 }
