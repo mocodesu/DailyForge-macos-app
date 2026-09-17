@@ -26,7 +26,11 @@ class EnforcementController: ObservableObject {
     private var checkTimer: Timer?
     private var graceTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
-    private let lastReminderKey = "lastReminderDayKey"
+    private var defaultsObserver: NSObjectProtocol?
+
+    /// Stores "dayKey:reminderSeconds" so changing the reminder time mid-day
+    /// produces a new fingerprint and the new time can fire.
+    private let lastReminderKey = "lastReminderFingerprint"
 
     private init() {
         DayState.shared.$allDone
@@ -37,6 +41,22 @@ class EnforcementController: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // Watch for preference changes so updates are picked up immediately
+        // rather than waiting for the 30-second tick.
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.tick()
+        }
+    }
+
+    deinit {
+        if let observer = defaultsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func start() {
@@ -52,6 +72,12 @@ class EnforcementController: ObservableObject {
         checkTimer = nil
         graceTimer?.invalidate()
         graceTimer = nil
+    }
+
+    /// Public entry point for external callers (e.g. PreferencesWindowController)
+    /// to force an immediate re-evaluation.
+    func refresh() {
+        tick()
     }
 
     // MARK: - Launch evaluation (today only)
@@ -110,8 +136,14 @@ class EnforcementController: ObservableObject {
         guard Date() >= reminderDate else { return }
 
         let today = DayLogic.dayKey()
-        if UserDefaults.standard.string(forKey: lastReminderKey) != today {
-            UserDefaults.standard.set(today, forKey: lastReminderKey)
+        let reminderSeconds = UserDefaults.standard.integer(forKey: PreferenceKeys.reminderTimeSeconds)
+        let fingerprint = "\(today):\(reminderSeconds)"
+
+        // Fire only when the (day, time) combination hasn't been fired yet.
+        // Changing the reminder time mid-day changes the fingerprint and
+        // therefore allows a new reminder to fire.
+        if UserDefaults.standard.string(forKey: lastReminderKey) != fingerprint {
+            UserDefaults.standard.set(fingerprint, forKey: lastReminderKey)
             fireReminder()
         }
     }
@@ -213,9 +245,6 @@ class OverlayEnforcer: ObservableObject {
 
         NSApp.activate(ignoringOtherApps: true)
 
-        // Save current presentation options, then hide the menu bar and Dock
-        // completely. This removes the Apple menu, application menus, clock,
-        // status icons, and Dock — with no hover-reveal.
         savedPresentationOptions = NSApp.presentationOptions
         NSApp.presentationOptions = [.hideMenuBar, .hideDock]
 
@@ -232,8 +261,6 @@ class OverlayEnforcer: ObservableObject {
         )
     }
 
-    /// Preview: shows the tint but does NOT block clicks or hide system UI,
-    /// so the user can still interact with the Preferences window.
     func preview(duration: TimeInterval) {
         guard !isActive else { return }
         isActive = true
@@ -259,20 +286,14 @@ class OverlayEnforcer: ObservableObject {
             object: nil
         )
 
-        // Restore the menu bar and Dock first
         if let saved = savedPresentationOptions {
             NSApp.presentationOptions = saved
             savedPresentationOptions = nil
         }
 
-        // Restore the main window's level and style mask
         if let window = mainWindow {
-            if let saved = savedMainWindowLevel {
-                window.level = saved
-            }
-            if let savedMask = savedMainWindowStyleMask {
-                window.styleMask = savedMask
-            }
+            if let saved = savedMainWindowLevel { window.level = saved }
+            if let savedMask = savedMainWindowStyleMask { window.styleMask = savedMask }
         }
         mainWindow = nil
         savedMainWindowLevel = nil
@@ -291,16 +312,13 @@ class OverlayEnforcer: ObservableObject {
 
     // MARK: - Quit blocking
 
-    /// Swallow Cmd+Q, Cmd+W, Cmd+H, and Cmd+M while the overlay is active.
     private func installQuitBlocker() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, self.isActive else { return event }
             guard event.modifierFlags.contains(.command) else { return event }
             if let chars = event.charactersIgnoringModifiers?.lowercased() {
-                if ["q", "w", "h", "m"].contains(chars) {
-                    return nil
-                }
+                if ["q", "w", "h", "m"].contains(chars) { return nil }
             }
             return event
         }
@@ -313,7 +331,7 @@ class OverlayEnforcer: ObservableObject {
         }
     }
 
-    // MARK: - Main window helpers
+    // MARK: - Main window
 
     private func showMainWindowIfNeeded() {
         let hasVisibleMain = NSApp.windows.contains {
@@ -343,7 +361,6 @@ class OverlayEnforcer: ObservableObject {
 
         window.level = .modalPanel
         window.styleMask.remove(.closable)
-
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
     }
@@ -385,6 +402,7 @@ class OverlayEnforcer: ObservableObject {
             window.orderFrontRegardless()
             overlayWindows.append(window)
         }
+
         if let mainWindow = mainWindow {
             mainWindow.orderFrontRegardless()
         }

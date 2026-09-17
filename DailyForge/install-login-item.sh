@@ -14,11 +14,10 @@
 #        - once at login (RunAtLoad)
 #        - every 15 minutes (:00, :15, :30, :45)
 #
-# The launcher only opens the app when:
-#   - the reminder is enabled
-#   - enforcement is enabled
-#   - the reminder time has already passed today
-#   - there are daily exercises
+# The launcher opens the app when:
+#   - the reminder is enabled and enforcement is on
+#   - the reminder time has already passed today, OR is within the next
+#     5 minutes (so the app can catch the reminder live)
 #   - at least one daily exercise is still incomplete for today
 #
 # Otherwise it exits silently. If the app is already running, it does
@@ -64,6 +63,10 @@ APP_PATH="/Applications/DailyForge.app"
 STORE="$HOME/Library/Application Support/default.store"
 LOG="$HOME/Library/Logs/DailyForge-launcher.log"
 
+# How many seconds before the reminder time to launch the app early.
+# The app will wait and fire the reminder on its own tick.
+BUFFER_SECS=300
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
 }
@@ -102,20 +105,25 @@ NOW_SECS=$(( 10#$H * 3600 + 10#$M * 60 + 10#$S ))
 # 6. Reminder time in seconds since midnight
 REMINDER_SECS=$(defaults read "$BUNDLE_ID" reminderTimeSeconds 2>/dev/null || echo "68400")
 
-if [ "$NOW_SECS" -lt "$REMINDER_SECS" ]; then
+# 7. Launch window check.
+#    If the reminder is more than BUFFER_SECS away, skip. Otherwise
+#    (either it's already passed, or it's within the buffer window)
+#    we may need to launch.
+LAUNCH_THRESHOLD=$(( REMINDER_SECS - BUFFER_SECS ))
+if [ "$NOW_SECS" -lt "$LAUNCH_THRESHOLD" ]; then
     REM_H=$(( REMINDER_SECS / 3600 ))
     REM_M=$(( (REMINDER_SECS % 3600) / 60 ))
-    log "Reminder not yet fired (set for ${REM_H}:$(printf %02d $REM_M))."
+    log "Reminder at ${REM_H}:$(printf %02d $REM_M) — not yet near. Skipping."
     exit 0
 fi
 
-# 7. Store present?
+# 8. Store present?
 if [ ! -f "$STORE" ]; then
     log "Store not found at $STORE. Skipping."
     exit 0
 fi
 
-# 8. Query the store
+# 9. Query the store
 TODAY=$(date +%Y-%m-%d)
 
 DAILY_COUNT=$(sqlite3 "$STORE" \
@@ -131,14 +139,20 @@ DONE_COUNT=$(sqlite3 "$STORE" \
 
 if [ -z "$DONE_COUNT" ]; then DONE_COUNT=0; fi
 
-# 9. All done today?
+# 10. All done today?
 if [ "$DONE_COUNT" -ge "$DAILY_COUNT" ]; then
     log "All done today ($DONE_COUNT/$DAILY_COUNT). Skipping."
     exit 0
 fi
 
-# 10. Missed tasks detected — launch
-log "Missed tasks ($DONE_COUNT/$DAILY_COUNT done). Launching DailyForge."
+# 11. Determine why we're launching for a clearer log line
+if [ "$NOW_SECS" -ge "$REMINDER_SECS" ]; then
+    log "Reminder passed, tasks remaining ($DONE_COUNT/$DAILY_COUNT). Launching DailyForge."
+else
+    BUFFER_LEFT=$(( REMINDER_SECS - NOW_SECS ))
+    log "Reminder in ${BUFFER_LEFT}s, tasks remaining ($DONE_COUNT/$DAILY_COUNT). Launching early."
+fi
+
 open -a "$APP_PATH"
 LAUNCHER_SCRIPT
 
@@ -196,12 +210,11 @@ echo "The launcher runs:"
 echo "  • once immediately at every login (RunAtLoad)"
 echo "  • every 15 minutes at :00, :15, :30, :45 (StartCalendarInterval)"
 echo ""
-echo "It opens DailyForge only when:"
+echo "It opens DailyForge when:"
 echo "  • reminder is enabled and enforcement is on"
-echo "  • the reminder time has already passed today"
+echo "  • the reminder time has passed OR is within the next 5 minutes"
 echo "  • at least one daily exercise is still incomplete"
 echo ""
 echo "Logs:        tail -f ~/Library/Logs/DailyForge-launcher.log"
 echo "Run now:     bash '$LAUNCHER'"
-echo "Next fire:   launchctl print gui/\$(id -u)/$LABEL | grep -A1 'next fire'"
 echo "Uninstall:   launchctl unload '$PLIST_PATH' && rm '$PLIST_PATH' '$LAUNCHER'"
