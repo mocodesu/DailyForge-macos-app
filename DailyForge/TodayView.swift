@@ -24,79 +24,53 @@ struct TodayView: View {
 
     #if DEBUG
     @State private var showManageExercises = false
-    @State private var showResetConfirmation = false
     #endif
 
     private let minimumExercises = 5
-
     private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-
-    // MARK: - Filtered
 
     private var exercises: [Exercise] {
         DayLogic.activeExercises(from: allExercises, on: today)
     }
-
     private var dailyExercises: [Exercise] {
         DayLogic.dailyExercises(from: allExercises)
     }
-
-    // MARK: - Derived
-
-    private var meetsMinimum: Bool {
-        exercises.count >= minimumExercises
-    }
-
-    private var remainingToMinimum: Int {
-        max(0, minimumExercises - exercises.count)
-    }
-
+    private var meetsMinimum: Bool { exercises.count >= minimumExercises }
+    private var remainingToMinimum: Int { max(0, minimumExercises - exercises.count) }
     private var allExercisesDone: Bool {
         DayLogic.allCompletedToday(exercises: exercises, records: records)
     }
-
-    private var allDone: Bool {
-        meetsMinimum && allExercisesDone
-    }
-
+    private var allDone: Bool { meetsMinimum && allExercisesDone }
     private var isLockedToday: Bool {
         let key = DayLogic.dayKey()
         return dayLocks.contains { $0.dayKey == key }
     }
-
     private var sworeToday: Bool {
         let key = DayLogic.dayKey()
         return swears.contains { $0.dayKey == key }
     }
-
     private var completedToday: Set<UUID> {
         let key = DayLogic.dayKey()
         return Set(records.filter { $0.dayKey == key }.map(\.exerciseID))
     }
-
     private var streak: Int {
         DayLogic.currentStreak(
             completedKeys: DayLogic.completedDayKeys(exercises: dailyExercises, records: records)
         )
     }
-
     private var progress: (done: Int, total: Int) {
         DayLogic.progressToday(exercises: exercises, records: records)
     }
-
     private var nextMilestoneDay: Int {
         let unlocked = Set(milestones.map(\.day))
         var day = 30
         while unlocked.contains(day) { day += 30 }
         return day
     }
-
     private var pendingMilestone: Milestone? {
         let target = nextMilestoneDay - 30
         return milestones.first { $0.completedAt == nil && $0.day == target }
     }
-
-    // MARK: - Body
 
     var body: some View {
         sheetsLayer
@@ -111,8 +85,7 @@ struct TodayView: View {
             .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
             .sheet(isPresented: $showSwearSheet) {
                 SwearView(dayKey: DayLogic.dayKey()) {
-                    // Swear recorded — now lock the day
-                    lockDay()
+                    DispatchQueue.main.async { publishDayState() }
                 }
             }
             #if DEBUG
@@ -130,18 +103,6 @@ struct TodayView: View {
             } message: {
                 Text("You have \(exercises.count) of \(minimumExercises) required daily exercises. Add \(remainingToMinimum) more to start the day.")
             }
-            #if DEBUG
-            .confirmationDialog(
-                "Reset DailyForge?",
-                isPresented: $showResetConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Reset Everything", role: .destructive) { resetEverything() }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("This deletes all exercises, history, your profile, day locks, swears, and milestones. You will start over at onboarding. This cannot be undone.")
-            }
-            #endif
     }
 
     private var lifecycleLayer: some View {
@@ -169,8 +130,6 @@ struct TodayView: View {
         }
         .frame(minWidth: 560, minHeight: 600)
     }
-
-    // MARK: - Sheet builders
 
     @ViewBuilder
     private func exerciseDetailSheet(_ exercise: Exercise) -> some View {
@@ -229,8 +188,6 @@ struct TodayView: View {
         }
     }
 
-    // MARK: - Lifecycle
-
     private func handleMinuteTick(_ now: Date) {
         today = now
         checkMilestoneUnlock()
@@ -242,18 +199,14 @@ struct TodayView: View {
 
         if !isLockedToday && !meetsMinimum && !allExercises.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                if !isLockedToday && !meetsMinimum {
-                    showMinimumAlert = true
-                }
+                if !isLockedToday && !meetsMinimum { showMinimumAlert = true }
             }
             return
         }
 
         if allDone && !isLockedToday && !showMilestoneUnlock && !sworeToday {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                if !showMilestoneUnlock && !isLockedToday {
-                    showDayCompletePrompt = true
-                }
+                if !showMilestoneUnlock && !isLockedToday { showDayCompletePrompt = true }
             }
         }
     }
@@ -262,9 +215,7 @@ struct TodayView: View {
         publishDayState()
         if newValue && !isLockedToday && !showMilestoneUnlock && activeSession == nil && !sworeToday {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                if !showMilestoneUnlock && !isLockedToday {
-                    showDayCompletePrompt = true
-                }
+                if !showMilestoneUnlock && !isLockedToday { showDayCompletePrompt = true }
             }
         }
     }
@@ -272,8 +223,6 @@ struct TodayView: View {
     private func handleExerciseCountChange(_ oldValue: Int, _ newValue: Int) {
         publishDayState()
     }
-
-    // MARK: - Main content
 
     private var mainContent: some View {
         VStack(spacing: 0) {
@@ -283,6 +232,7 @@ struct TodayView: View {
             Divider()
             footer
         }
+        .background(Theme.surfaceBase)
     }
 
     private var header: some View {
@@ -291,7 +241,7 @@ struct TodayView: View {
                 Text(today.formatted(.dateTime.weekday(.wide).month(.wide).day()))
                     .font(.title.bold())
                 Text("Hi \(profile.displayName) — \(progress.done) of \(progress.total) done today")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
@@ -301,7 +251,7 @@ struct TodayView: View {
             Button(action: PreferencesOpener.open) {
                 Image(systemName: "gearshape")
                     .font(.title3)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             .buttonStyle(.plain)
             .help("Preferences")
@@ -314,17 +264,21 @@ struct TodayView: View {
         VStack(spacing: 2) {
             HStack(spacing: 4) {
                 Image(systemName: "flame.fill")
-                    .foregroundStyle(streak > 0 ? .orange : .secondary)
+                    .foregroundStyle(streak > 0 ? Theme.accentFill : Theme.textSecondary)
                 Text("\(streak)")
                     .font(.title2.bold().monospacedDigit())
             }
             Text("day streak")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.08))
+        .background(Theme.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -355,14 +309,14 @@ struct TodayView: View {
     private var minimumNotMetBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.warning)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add \(remainingToMinimum) more exercise\(remainingToMinimum == 1 ? "" : "s")")
                     .font(.headline)
                 Text("You need at least \(minimumExercises) exercises per day.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             Button("Add Exercise") { showCreateExercise = true }
@@ -371,19 +325,19 @@ struct TodayView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color.orange.opacity(0.12))
+        .background(Theme.warningSoft)
     }
 
     private var swearBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.success)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
                 Text("All exercises done!").font(.headline)
                 Text("Swear by voice to seal the day.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             Button {
@@ -396,40 +350,37 @@ struct TodayView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color.green.opacity(0.10))
+        .background(Theme.successSoft)
     }
 
     private var allDoneBanner: some View {
         HStack(spacing: 12) {
             Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.success)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Day sealed.").font(.headline)
                 Text("You swore by voice. Well done.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
-            Button("I'm done for today") { lockDay() }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color.green.opacity(0.10))
+        .background(Theme.successSoft)
     }
 
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "figure.strengthtraining.traditional")
                 .font(.system(size: 56))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             Text("No exercises today")
                 .font(.title2.bold())
             Text("Set up at least \(minimumExercises) exercises to begin your daily routine.")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
                 .frame(maxWidth: 380)
             Button("Create Exercise") { showCreateExercise = true }
                 .buttonStyle(.borderedProminent)
@@ -442,18 +393,18 @@ struct TodayView: View {
         VStack(spacing: 18) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 72))
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.success)
             Text("Done for today").font(.largeTitle.bold())
             if sworeToday {
                 Text("You swore by voice. The day is sealed.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             } else {
                 Text("Come back tomorrow. Rest is part of the plan.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Text("\(streak) day streak • Next milestone at \(nextMilestoneDay) days")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
                 .padding(.top, 4)
 
             #if DEBUG
@@ -485,9 +436,7 @@ struct TodayView: View {
     private func exerciseRow(_ exercise: Exercise) -> some View {
         let isDone = completedToday.contains(exercise.id)
         ExerciseCard(exercise: exercise, isDone: isDone)
-            .onTapGesture {
-                selectedExercise = exercise
-            }
+            .onTapGesture { selectedExercise = exercise }
     }
 
     private var footer: some View {
@@ -496,16 +445,6 @@ struct TodayView: View {
                 Label("History", systemImage: "clock.arrow.circlepath")
             }
             .buttonStyle(.bordered)
-
-            #if DEBUG
-            Button(role: .destructive) {
-                showResetConfirmation = true
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .buttonStyle(.bordered)
-            .help("Erase everything and start over")
-            #endif
 
             Spacer()
 
@@ -516,14 +455,12 @@ struct TodayView: View {
                 .buttonStyle(.bordered)
             } else {
                 Label("Locked until tomorrow", systemImage: "lock.fill")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .font(.callout)
             }
         }
         .padding(16)
     }
-
-    // MARK: - Actions
 
     private func publishDayState() {
         DayState.shared.allDone = allDone
@@ -545,7 +482,14 @@ struct TodayView: View {
             try? context.save()
         }
         activeSession = nil
-        // ...rest unchanged...
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            publishDayState()
+            checkMilestoneUnlock()
+            if allDone && !isLockedToday && !showMilestoneUnlock && !sworeToday {
+                showDayCompletePrompt = true
+            }
+        }
     }
 
     private func lockDay() {
@@ -554,8 +498,6 @@ struct TodayView: View {
             return
         }
         guard sworeToday else {
-            // Safety net: if we somehow get here without a swear recorded,
-            // open the swear sheet instead of locking.
             showSwearSheet = true
             return
         }
@@ -579,40 +521,6 @@ struct TodayView: View {
             showMilestoneUnlock = true
         }
     }
-
-    // MARK: - Reset (DEBUG)
-
-    #if DEBUG
-    private func resetEverything() {
-        OverlayEnforcer.shared.stop()
-
-        deleteAll(Exercise.self)
-        deleteAll(CompletionRecord.self)
-        deleteAll(DayLock.self)
-        deleteAll(DailySwear.self)
-        deleteAll(Milestone.self)
-        deleteAll(UserProfile.self)
-
-        do {
-            try context.save()
-        } catch {
-            print("⚠️ Reset save failed: \(error)")
-        }
-
-        DayState.shared.allDone = false
-        DayState.shared.isLocked = false
-        DayState.shared.exerciseCount = 0
-        DayState.shared.dayKey = DayLogic.dayKey()
-    }
-
-    private func deleteAll<T: PersistentModel>(_ type: T.Type) {
-        let descriptor = FetchDescriptor<T>()
-        guard let items = try? context.fetch(descriptor) else { return }
-        for item in items {
-            context.delete(item)
-        }
-    }
-    #endif
 }
 
 // MARK: - Day Complete Prompt
@@ -626,14 +534,14 @@ struct DayCompletePrompt: View {
         VStack(spacing: 18) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 56))
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.success)
             Text("Day complete!").font(.title.bold())
             Text("You finished all \(exerciseCount) exercise\(exerciseCount == 1 ? "" : "s"). Ready to seal it?")
                 .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             Text("You'll swear by voice that you did the work.")
                 .font(.callout)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.textTertiary)
             HStack(spacing: 12) {
                 Button("Add more exercises") { onAddMore() }
                     .buttonStyle(.bordered)
@@ -650,5 +558,6 @@ struct DayCompletePrompt: View {
         }
         .padding(28)
         .frame(width: 440)
+        .background(Theme.surfaceBase)
     }
 }

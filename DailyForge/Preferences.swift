@@ -19,10 +19,7 @@ enum PreferenceKeys {
 
     static let unitSystem = "unitSystem"
 
-    /// The exact phrase the user must speak to seal a day.
     static let swearPhrase = "swearPhrase"
-
-    /// True if the user has not overridden the default swear phrase yet.
     static let swearPhraseIsDefault = "swearPhraseIsDefault"
 }
 
@@ -40,7 +37,7 @@ struct Preferences {
             PreferenceKeys.graceMinutes: 15,
             PreferenceKeys.enforceKiosk: true,
 
-            PreferenceKeys.overlayColorHex: "#FF3B30",
+            PreferenceKeys.overlayColorHex: "#FF6B35",
             PreferenceKeys.overlayMinOpacity: 0.12,
             PreferenceKeys.overlayMaxOpacity: 0.30,
             PreferenceKeys.overlayPulseSeconds: 1.4,

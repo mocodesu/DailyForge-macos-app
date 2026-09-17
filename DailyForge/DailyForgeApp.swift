@@ -12,7 +12,6 @@ struct DailyForgeApp: App {
     init() {
         Preferences.registerDefaults()
 
-        // Rolling auto-backup BEFORE the store is touched.
         StoreBackup.autoBackupIfNeeded()
 
         let schema = Schema([
@@ -60,6 +59,8 @@ struct DailyForgeApp: App {
                     RootView()
                 }
             }
+            .tint(Theme.accentFill)
+            .background(Theme.surfaceBase)
             .onAppear {
                 DailyForgeAppDelegate.sharedContainer = container
             }
@@ -182,7 +183,7 @@ struct StartupErrorView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 48))
-                .foregroundStyle(.orange)
+                .foregroundStyle(Theme.warning)
             Text("Storage issue").font(.title.bold())
             Text(message)
                 .multilineTextAlignment(.center)
@@ -201,5 +202,6 @@ struct StartupErrorView: View {
         }
         .padding(40)
         .frame(minWidth: 560, minHeight: 360)
+        .background(Theme.surfaceBase)
     }
 }

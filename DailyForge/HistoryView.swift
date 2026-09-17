@@ -10,10 +10,7 @@ struct HistoryView: View {
 
     @State private var selectedDay: DayProgress?
 
-    /// How many days back to display, starting from today.
     private let daysToShow = 30
-
-    // MARK: - Days
 
     private var days: [DayProgress] {
         let calendar = Calendar.current
@@ -42,8 +39,6 @@ struct HistoryView: View {
         )
     }
 
-    // MARK: - Body
-
     var body: some View {
         VStack(spacing: 0) {
             header
@@ -51,12 +46,9 @@ struct HistoryView: View {
             content
         }
         .frame(width: 720, height: 660)
+        .background(Theme.surfaceBase)
         .sheet(item: $selectedDay) { day in
-            DayDetailView(
-                day: day,
-                exercises: exercises,
-                records: records
-            )
+            DayDetailView(day: day, exercises: exercises, records: records)
         }
     }
 
@@ -66,7 +58,7 @@ struct HistoryView: View {
                 Text("History").font(.title.bold())
                 Text("Last \(daysToShow) days — tap a circle for details")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             summaryBadge
@@ -83,11 +75,15 @@ struct HistoryView: View {
                 .font(.title3.bold().monospacedDigit())
             Text("days complete")
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08))
+        .background(Theme.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -97,9 +93,9 @@ struct HistoryView: View {
             VStack(spacing: 12) {
                 Image(systemName: "calendar")
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 Text("No history yet")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -112,9 +108,7 @@ struct HistoryView: View {
                         DayCircle(day: day)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                if day.total > 0 {
-                                    selectedDay = day
-                                }
+                                if day.total > 0 { selectedDay = day }
                             }
                     }
                 }
@@ -162,14 +156,13 @@ struct DayCircle: View {
     var body: some View {
         VStack(spacing: 8) {
             ringView
-
             VStack(spacing: 1) {
                 Text(day.percentText)
                     .font(.callout.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Theme.textPrimary)
                 Text(day.countText)
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
         }
         .frame(maxWidth: .infinity)
@@ -178,7 +171,7 @@ struct DayCircle: View {
     private var ringView: some View {
         ZStack {
             Circle()
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 6)
+                .stroke(Theme.surfaceSunken, lineWidth: 6)
 
             Circle()
                 .trim(from: 0, to: day.progress)
@@ -189,17 +182,17 @@ struct DayCircle: View {
             Text(day.dayNumber)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(day.isToday ? Color.accentColor : .primary)
+                .foregroundStyle(day.isToday ? Theme.accentFill : Theme.textPrimary)
         }
         .frame(width: 68, height: 68)
         .overlay(alignment: .topTrailing) {
             if day.isToday {
                 Circle()
-                    .fill(Color.accentColor)
+                    .fill(Theme.accentFill)
                     .frame(width: 10, height: 10)
                     .overlay(
                         Circle()
-                            .stroke(Color(nsColor: .controlBackgroundColor), lineWidth: 2)
+                            .stroke(Theme.surfaceBase, lineWidth: 2)
                     )
                     .offset(x: 2, y: -2)
             }
@@ -207,11 +200,11 @@ struct DayCircle: View {
     }
 
     private var ringColor: Color {
-        guard day.total > 0 else { return .secondary.opacity(0.35) }
-        if day.progress >= 1.0 { return .green }
-        if day.progress >= 0.6 { return .yellow }
-        if day.progress > 0 { return .orange }
-        return .red.opacity(0.75)
+        guard day.total > 0 else { return Theme.textTertiary.opacity(0.35) }
+        if day.progress >= 1.0 { return Theme.success }
+        if day.progress >= 0.6 { return Theme.warning }
+        if day.progress > 0 { return Theme.accentFill }
+        return Theme.accentDeep.opacity(0.75)
     }
 }
 
@@ -224,8 +217,6 @@ struct DayDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
 
-    // MARK: - Derived
-
     private var dayRecords: [CompletionRecord] {
         records
             .filter { $0.dayKey == day.id }
@@ -236,8 +227,6 @@ struct DayDetailView: View {
         Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
     }
 
-    /// Effective start of the day's workout — earliest startedAt, falling
-    /// back to the earliest completedAt for records without a start time.
     private var firstStart: Date? {
         let starts = dayRecords.compactMap(\.startedAt)
         if let earliest = starts.min() { return earliest }
@@ -248,13 +237,11 @@ struct DayDetailView: View {
         dayRecords.map(\.completedAt).max()
     }
 
-    /// Wall-clock time from first start to last completion.
     private var totalWallClock: TimeInterval? {
         guard let start = firstStart, let end = lastCompletion else { return nil }
         return end.timeIntervalSince(start)
     }
 
-    /// Sum of each exercise's own start → completion.
     private var totalWorkTime: TimeInterval {
         dayRecords.reduce(0) { sum, record in
             guard let start = record.startedAt else { return sum }
@@ -262,7 +249,6 @@ struct DayDetailView: View {
         }
     }
 
-    /// Wall-clock minus work time.
     private var totalBreakTime: TimeInterval {
         max(0, (totalWallClock ?? 0) - totalWorkTime)
     }
@@ -270,8 +256,6 @@ struct DayDetailView: View {
     private var hasStartTimes: Bool {
         dayRecords.contains { $0.startedAt != nil }
     }
-
-    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
@@ -286,6 +270,7 @@ struct DayDetailView: View {
             }
         }
         .frame(width: 640, height: 680)
+        .background(Theme.surfaceBase)
     }
 
     private var header: some View {
@@ -295,7 +280,7 @@ struct DayDetailView: View {
                     .font(.title2.bold())
                 Text(day.total > 0 ? "\(day.completed) of \(day.total) completed" : "No exercises scheduled")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             Button("Close") { dismiss() }
@@ -303,31 +288,28 @@ struct DayDetailView: View {
         .padding(20)
     }
 
-    // MARK: - Summary
-
     private var summarySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Session summary")
-                .font(.headline)
+            Text("Session summary").font(.headline)
 
             HStack(spacing: 12) {
                 summaryCard(
                     title: "Total time",
                     value: totalWallClock.map(formatLongDuration) ?? "—",
                     subtitle: hasStartTimes ? "first start → last done" : "no start times recorded",
-                    tint: .accentColor
+                    tint: Theme.accent
                 )
                 summaryCard(
                     title: "Work time",
                     value: formatLongDuration(totalWorkTime),
                     subtitle: "sum of active sessions",
-                    tint: .green
+                    tint: Theme.success
                 )
                 summaryCard(
                     title: "Break time",
                     value: hasStartTimes ? formatLongDuration(totalBreakTime) : "—",
                     subtitle: "time between exercises",
-                    tint: .orange
+                    tint: Theme.warning
                 )
             }
 
@@ -335,7 +317,7 @@ struct DayDetailView: View {
                 HStack(spacing: 20) {
                     timePill(label: "Started", date: firstStart)
                     Image(systemName: "arrow.right")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.textTertiary)
                     timePill(label: "Finished", date: lastCompletion)
                 }
                 .padding(.top, 4)
@@ -345,50 +327,47 @@ struct DayDetailView: View {
 
     private func summaryCard(title: String, value: String, subtitle: String, tint: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text(title).font(.caption).foregroundStyle(Theme.textSecondary)
             Text(value)
                 .font(.title3.bold().monospacedDigit())
                 .foregroundStyle(tint)
             Text(subtitle)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.textTertiary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Theme.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
     private func timePill(label: String, date: Date?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            Text(label).font(.caption2).foregroundStyle(Theme.textSecondary)
             Text(date.map { $0.formatted(date: .omitted, time: .shortened) } ?? "—")
                 .font(.callout.weight(.medium).monospacedDigit())
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.08))
+        .background(Theme.surfaceSunken)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
-
-    // MARK: - Timeline
 
     @ViewBuilder
     private var timelineSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Per-exercise breakdown")
-                .font(.headline)
+            Text("Per-exercise breakdown").font(.headline)
 
             if dayRecords.isEmpty {
                 Text("No exercises were completed on this day.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 12)
             } else {
@@ -408,11 +387,11 @@ struct DayDetailView: View {
         return HStack(alignment: .top, spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Color.green.opacity(0.15))
+                    .fill(Theme.successSoft)
                     .frame(width: 28, height: 28)
                 Text("\(index)")
                     .font(.caption.bold().monospacedDigit())
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.success)
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -424,8 +403,8 @@ struct DayDetailView: View {
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color.orange.opacity(0.18))
-                            .foregroundStyle(.orange)
+                            .background(Theme.warningSoft)
+                            .foregroundStyle(Theme.warning)
                             .clipShape(Capsule())
                     }
                 }
@@ -433,11 +412,11 @@ struct DayDetailView: View {
                 if let start = record.startedAt {
                     Text("Started \(start.formatted(date: .omitted, time: .shortened)) → Done \(record.completedAt.formatted(date: .omitted, time: .shortened))")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 } else {
                     Text("Completed \(record.completedAt.formatted(date: .omitted, time: .shortened)) (no start time)")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.textTertiary)
                 }
             }
 
@@ -446,22 +425,25 @@ struct DayDetailView: View {
             if let duration = duration {
                 Text(formatLongDuration(duration))
                     .font(.callout.bold().monospacedDigit())
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accent)
             } else {
                 Text("—")
                     .font(.callout.bold().monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
         .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Theme.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Theme.border, lineWidth: 0.5)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 }
 
 // MARK: - Duration formatting
 
-/// Formats a TimeInterval as human-readable: "45s", "12m 30s", "1h 23m", etc.
 func formatLongDuration(_ interval: TimeInterval) -> String {
     let total = Int(interval.rounded())
     if total < 60 { return "\(total)s" }

@@ -13,10 +13,10 @@ struct ExerciseCard: View {
         HStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(isDone ? Color.green : Color.accentColor.opacity(0.15))
+                    .fill(isDone ? Theme.success : Theme.accentFill.opacity(0.15))
                     .frame(width: 44, height: 44)
-                Image(systemName: isDone ? "checkmark" : iconName)
-                    .foregroundStyle(isDone ? .white : Color.accentColor)
+                Image(systemName: isDone ? "checkmark" : WorkoutIcons.primaryIcon(for: exercise))
+                    .foregroundStyle(isDone ? .white : Theme.accentFill)
                     .font(.headline)
             }
 
@@ -25,7 +25,7 @@ struct ExerciseCard: View {
                     Text(exercise.name)
                         .font(.headline)
                         .strikethrough(isDone)
-                        .foregroundStyle(isDone ? .secondary : .primary)
+                        .foregroundStyle(isDone ? Theme.textSecondary : Theme.textPrimary)
 
                     if !exercise.isDaily {
                         Text("ONE-OFF")
@@ -33,8 +33,8 @@ struct ExerciseCard: View {
                             .tracking(0.5)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.18))
-                            .foregroundStyle(.orange)
+                            .background(Theme.warningSoft)
+                            .foregroundStyle(Theme.warning)
                             .clipShape(Capsule())
                     }
                 }
@@ -42,15 +42,10 @@ struct ExerciseCard: View {
                 HStack(spacing: 6) {
                     Text(metricSummary)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
 
                     ForEach(exercise.bodyParts, id: \.self) { part in
-                        Text(part)
-                            .font(.caption.weight(.medium))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12))
-                            .clipShape(Capsule())
+                        BodyPartPill(part: part, compact: true)
                     }
                 }
             }
@@ -59,27 +54,23 @@ struct ExerciseCard: View {
 
             if isDone {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.success)
                     .font(.title2)
             } else {
                 Image(systemName: "chevron.right")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
         .padding(16)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(isDone ? Color.secondary.opacity(0.06) : Color(nsColor: .controlBackgroundColor))
+                .fill(isDone ? Theme.surfaceSunken : Theme.surfaceElevated)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(isDone ? Color.clear : Color.secondary.opacity(0.15), lineWidth: 1)
+                .strokeBorder(isDone ? Color.clear : Theme.border, lineWidth: 1)
         )
         .opacity(isDone ? 0.6 : 1.0)
-    }
-
-    private var iconName: String {
-        exercise.exerciseType == .timer ? "timer" : "figure.strengthtraining.traditional"
     }
 
     private var metricSummary: String {
@@ -89,6 +80,27 @@ struct ExerciseCard: View {
         case .timer:
             return "\(exercise.sets) × \(formatDuration(exercise.durationSeconds))"
         }
+    }
+}
+
+// MARK: - Body Part Pill (with icon)
+
+struct BodyPartPill: View {
+    let part: String
+    var compact: Bool = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: WorkoutIcons.icon(forBodyPart: part))
+                .font(compact ? .caption2 : .caption)
+            Text(part)
+                .font(compact ? .caption.weight(.medium) : .callout.weight(.medium))
+        }
+        .padding(.horizontal, compact ? 8 : 10)
+        .padding(.vertical, compact ? 2 : 4)
+        .background(Theme.surfaceSunken)
+        .foregroundStyle(Theme.textSecondary)
+        .clipShape(Capsule())
     }
 }
 
@@ -120,6 +132,7 @@ struct ExerciseDetailSheet: View {
         }
         .padding(28)
         .frame(width: 520, height: sheetHeight)
+        .background(Theme.surfaceBase)
         .confirmationDialog(
             "Stop repeating this exercise every day?",
             isPresented: $showDisableConfirmation,
@@ -153,11 +166,11 @@ struct ExerciseDetailSheet: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: exercise.exerciseType.icon)
-                    .foregroundStyle(Color.accentColor)
+                Image(systemName: WorkoutIcons.icon(forType: exercise.exerciseType))
+                    .foregroundStyle(Theme.accentFill)
                 Text(exercise.exerciseType.displayName.uppercased())
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accentFill)
                     .tracking(0.5)
 
                 if exercise.isDaily {
@@ -166,7 +179,7 @@ struct ExerciseDetailSheet: View {
                         Text("DAILY")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Theme.accentFill)
                     .tracking(0.5)
                 } else {
                     HStack(spacing: 3) {
@@ -174,21 +187,26 @@ struct ExerciseDetailSheet: View {
                         Text("ONE-OFF")
                     }
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.warning)
                     .tracking(0.5)
                 }
             }
-            Text(exercise.name).font(.largeTitle.bold())
+
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Theme.accentFill.opacity(0.15))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: WorkoutIcons.primaryIcon(for: exercise))
+                        .font(.title2)
+                        .foregroundStyle(Theme.accentFill)
+                }
+                Text(exercise.name).font(.largeTitle.bold())
+            }
 
             FlowLayout(spacing: 6) {
                 ForEach(exercise.bodyParts, id: \.self) { part in
-                    Text(part)
-                        .font(.callout.weight(.medium))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Color.accentColor.opacity(0.15))
-                        .foregroundStyle(Color.accentColor)
-                        .clipShape(Capsule())
+                    BodyPartPill(part: part, compact: false)
                 }
             }
         }
@@ -214,18 +232,18 @@ struct ExerciseDetailSheet: View {
             HStack(spacing: 12) {
                 Image(systemName: "timer")
                     .font(.title2)
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Theme.accentFill)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Session timer")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                     Text(formatDuration(exercise.sessionDurationSeconds))
                         .font(.title3.bold().monospacedDigit())
                 }
                 Spacer()
                 Text("Cannot be stopped once started")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
             }
             .padding(8)
         }
@@ -236,7 +254,7 @@ struct ExerciseDetailSheet: View {
             HStack(spacing: 12) {
                 Image(systemName: exercise.isDaily ? "repeat" : "1.circle")
                     .font(.title2)
-                    .foregroundStyle(exercise.isDaily ? .blue : .orange)
+                    .foregroundStyle(exercise.isDaily ? Theme.accentFill : Theme.warning)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Repeat every day")
@@ -245,7 +263,7 @@ struct ExerciseDetailSheet: View {
                          ? "Turn off to remove this exercise from your daily list."
                          : "This exercise is no longer part of your daily routine.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                 }
 
                 Spacer()
@@ -253,11 +271,8 @@ struct ExerciseDetailSheet: View {
                 Toggle("", isOn: Binding(
                     get: { exercise.isDaily },
                     set: { newValue in
-                        if newValue {
-                            enableDaily()
-                        } else {
-                            showDisableConfirmation = true
-                        }
+                        if newValue { enableDaily() }
+                        else { showDisableConfirmation = true }
                     }
                 ))
                 .toggleStyle(.switch)
@@ -280,7 +295,7 @@ struct ExerciseDetailSheet: View {
             if isCompletedToday {
                 HStack {
                     Label("Completed today", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Theme.success)
                     Spacer()
                     Button("Close") { dismiss() }
                         .keyboardShortcut(.defaultAction)
@@ -301,20 +316,17 @@ struct ExerciseDetailSheet: View {
             }
 
             #if DEBUG
-            Divider()
-                .padding(.vertical, 4)
+            Divider().padding(.vertical, 4)
 
             if !isCompletedToday {
-                HStack(spacing: 8) {
-                    Button {
-                        onComplete()
-                    } label: {
-                        Label("Skip Timer & Mark Done", systemImage: "forward.end.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
+                Button {
+                    onComplete()
+                } label: {
+                    Label("Skip Timer & Mark Done", systemImage: "forward.end.fill")
+                        .frame(maxWidth: .infinity)
                 }
+                .buttonStyle(.bordered)
+                .tint(Theme.warning)
             }
 
             Button(role: .destructive) {
@@ -331,11 +343,9 @@ struct ExerciseDetailSheet: View {
     private func statTile(value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(value).font(.title.bold().monospacedDigit())
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label).font(.caption).foregroundStyle(Theme.textSecondary)
         }
     }
-
-    // MARK: - Mutations
 
     private func disableDaily() {
         exercise.isDaily = false
@@ -358,9 +368,7 @@ struct ExerciseDetailSheet: View {
             predicate: #Predicate { $0.exerciseID == id }
         )
         if let records = try? context.fetch(descriptor) {
-            for record in records {
-                context.delete(record)
-            }
+            for record in records { context.delete(record) }
         }
         context.delete(exercise)
         try? context.save()
@@ -388,6 +396,7 @@ struct ManageExercisesView: View {
             listContent
         }
         .frame(width: 540, height: 620)
+        .background(Theme.surfaceBase)
         .sheet(isPresented: $showCreateExercise) {
             CreateExerciseView(nextSortIndex: nextSortIndex)
         }
@@ -420,7 +429,7 @@ struct ManageExercisesView: View {
                 Text("Manage Exercises").font(.title2.bold())
                 Text("\(exercises.count) exercise\(exercises.count == 1 ? "" : "s") • Delete or add more.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
             Button {
@@ -441,9 +450,9 @@ struct ManageExercisesView: View {
             VStack(spacing: 12) {
                 Image(systemName: "tray")
                     .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 Text("No exercises yet")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                 Button {
                     showCreateExercise = true
                 } label: {
@@ -470,9 +479,7 @@ struct ManageExercisesView: View {
             predicate: #Predicate { $0.exerciseID == id }
         )
         if let records = try? context.fetch(descriptor) {
-            for record in records {
-                context.delete(record)
-            }
+            for record in records { context.delete(record) }
         }
         context.delete(exercise)
         try? context.save()
@@ -485,9 +492,9 @@ private struct ManageRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: exercise.exerciseType.icon)
-                .foregroundStyle(.secondary)
-                .frame(width: 20)
+            Image(systemName: WorkoutIcons.primaryIcon(for: exercise))
+                .foregroundStyle(Theme.accentFill)
+                .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
@@ -497,14 +504,14 @@ private struct ManageRow: View {
                             .font(.caption2.weight(.bold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
-                            .background(Color.orange.opacity(0.18))
-                            .foregroundStyle(.orange)
+                            .background(Theme.warningSoft)
+                            .foregroundStyle(Theme.warning)
                             .clipShape(Capsule())
                     }
                 }
                 Text(summary)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
             }
 
             Spacer()
@@ -533,17 +540,19 @@ private struct ManageRow: View {
 
 struct WorkoutSessionView: View {
     let exercise: Exercise
-    /// Called when the user confirms completion, with the timestamp of
-    /// when the session started.
     var onComplete: (Date) -> Void
 
     @State private var endDate: Date
     @State private var now = Date()
     @State private var finished = false
 
-    private let startedAt: Date
+    /// The last whole second we played a tick for. Used to detect when the
+    /// displayed countdown value has changed, since the ticker fires twice
+    /// per second.
+    @State private var lastTickSecond: Int = -1
 
-    private let ticker = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+    private let startedAt: Date
+    private let ticker = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
 
     init(exercise: Exercise, onComplete: @escaping (Date) -> Void) {
         self.exercise = exercise
@@ -563,7 +572,7 @@ struct WorkoutSessionView: View {
 
     var body: some View {
         ZStack {
-            Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+            Theme.surfaceBase.ignoresSafeArea()
 
             VStack(spacing: 36) {
                 titleBlock
@@ -574,21 +583,49 @@ struct WorkoutSessionView: View {
             .padding(60)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .onAppear {
+            // Initial "start" sound when the sheet appears.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                NSSound(named: "Pop")?.play()
+                lastTickSecond = Int(ceil(remaining))
+            }
+        }
         .onReceive(ticker) { date in
             now = date
-            if !finished && remaining <= 0 {
-                finished = true
-                NSSound(named: "Glass")?.play()
+            let currentSecond = Int(ceil(remaining))
+
+            if !finished {
+                // Play a tick each time the displayed second changes.
+                // Skips the very first value so it doesn't double up with
+                // the "Pop" start sound.
+                if currentSecond != lastTickSecond, lastTickSecond >= 0 {
+                    lastTickSecond = currentSecond
+                    if currentSecond > 0 {
+                        NSSound(named: "Tink")?.play()
+                    }
+                } else if lastTickSecond < 0 {
+                    lastTickSecond = currentSecond
+                }
+
+                if remaining <= 0 {
+                    finished = true
+                    NSSound(named: "Glass")?.play()
+                }
             }
         }
     }
 
     private var titleBlock: some View {
-        VStack(spacing: 8) {
-            Text(exercise.exerciseType == .timer ? "HOLD" : "WORKOUT")
-                .font(.caption.weight(.semibold))
-                .tracking(3)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: WorkoutIcons.primaryIcon(for: exercise))
+                    .font(.title3)
+                    .foregroundStyle(Theme.accentFill)
+                Text(exercise.exerciseType == .timer ? "HOLD" : "WORKOUT")
+                    .font(.caption.weight(.semibold))
+                    .tracking(3)
+                    .foregroundStyle(Theme.textSecondary)
+            }
             Text(exercise.name)
                 .font(.system(size: 38, weight: .bold))
                 .multilineTextAlignment(.center)
@@ -598,12 +635,14 @@ struct WorkoutSessionView: View {
     private var ringBlock: some View {
         ZStack {
             Circle()
-                .stroke(Color.secondary.opacity(0.15), lineWidth: 20)
+                .stroke(Theme.surfaceSunken, lineWidth: 20)
 
             Circle()
                 .trim(from: 0, to: progress)
                 .stroke(
-                    finished ? Color.green : Color.accentColor,
+                    finished
+                        ? AnyShapeStyle(Theme.success)
+                        : AnyShapeStyle(Theme.flameGradient),
                     style: StrokeStyle(lineWidth: 20, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -617,7 +656,7 @@ struct WorkoutSessionView: View {
                     .animation(.default, value: Int(ceil(remaining)))
                 Text(finished ? "Complete!" : "remaining")
                     .font(.callout)
-                    .foregroundStyle(finished ? .green : .secondary)
+                    .foregroundStyle(finished ? Theme.success : Theme.textSecondary)
             }
         }
         .frame(width: 300, height: 300)
@@ -629,11 +668,11 @@ struct WorkoutSessionView: View {
         case .reps:
             Text("\(exercise.sets) sets × \(exercise.reps) reps")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         case .timer:
             Text("\(exercise.sets) sets × \(formatDuration(exercise.durationSeconds)) hold")
                 .font(.title3)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
@@ -652,16 +691,14 @@ struct WorkoutSessionView: View {
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "lock.fill")
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
                 Text("This timer cannot be stopped.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(Theme.textTertiary)
             }
         }
     }
 }
-
- 
 
 // MARK: - Create Sheet
 
@@ -673,11 +710,8 @@ struct CreateExerciseView: View {
 
     @State private var offset = 0
     @State private var justSavedCount = 0
-
-    // Catalog pre-fill
     @State private var selectedCatalogName: String = ""
 
-    // Form fields
     @State private var name = ""
     @State private var selectedBodyParts: Set<String> = []
     @State private var exerciseType: ExerciseType = .reps
@@ -704,11 +738,7 @@ struct CreateExerciseView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
-
-                if justSavedCount > 0 {
-                    savedBanner
-                }
-
+                if justSavedCount > 0 { savedBanner }
                 quickStartBox
                 formBox
 
@@ -718,7 +748,7 @@ struct CreateExerciseView: View {
                 }
 
                 if let errorMessage {
-                    Text(errorMessage).foregroundStyle(.red).font(.callout)
+                    Text(errorMessage).foregroundStyle(Theme.danger).font(.callout)
                 }
 
                 actionButtons
@@ -726,29 +756,28 @@ struct CreateExerciseView: View {
             .padding(24)
         }
         .frame(width: 580, height: 940)
+        .background(Theme.surfaceBase)
     }
-
-    // MARK: - Sections
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("New Exercise").font(.largeTitle.bold())
             Text("Once saved, this exercise is locked in. You can still change the daily-repeat flag later.")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
         }
     }
 
     private var savedBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .foregroundStyle(Theme.success)
             Text("\(justSavedCount) exercise\(justSavedCount == 1 ? "" : "s") saved. Keep going or close when done.")
                 .font(.callout)
             Spacer()
         }
         .padding(10)
-        .background(Color.green.opacity(0.10))
+        .background(Theme.successSoft)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -757,7 +786,7 @@ struct CreateExerciseView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Pick a common home workout to prefill every field below. You can still edit anything before saving.")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 10) {
@@ -766,7 +795,9 @@ struct CreateExerciseView: View {
                         ForEach(WorkoutCatalog.categories, id: \.self) { category in
                             Section(category) {
                                 ForEach(WorkoutCatalog.byCategory(category)) { item in
-                                    Text(item.name).tag(item.name)
+                                    Label(item.name,
+                                          systemImage: WorkoutIcons.icon(forCategory: category))
+                                        .tag(item.name)
                                 }
                             }
                         }
@@ -778,11 +809,9 @@ struct CreateExerciseView: View {
                     }
 
                     if !selectedCatalogName.isEmpty {
-                        Button("Clear") {
-                            selectedCatalogName = ""
-                        }
-                        .buttonStyle(.link)
-                        .font(.caption)
+                        Button("Clear") { selectedCatalogName = "" }
+                            .buttonStyle(.link)
+                            .font(.caption)
                     }
 
                     Spacer()
@@ -798,24 +827,18 @@ struct CreateExerciseView: View {
 
     private func catalogPreview(_ item: CatalogExercise) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            FlowLayout(spacing: 6) {
+            HStack(spacing: 6) {
                 ForEach(item.bodyParts, id: \.self) { part in
-                    Text(part)
-                        .font(.caption2.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.15))
-                        .foregroundStyle(Color.accentColor)
-                        .clipShape(Capsule())
+                    BodyPartPill(part: part, compact: true)
                 }
             }
             Text(metricLine(for: item))
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.textSecondary)
             Text(item.notes)
                 .font(.caption)
                 .italic()
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -838,10 +861,12 @@ struct CreateExerciseView: View {
                     .textFieldStyle(.roundedBorder)
 
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Type").font(.caption).foregroundStyle(.secondary)
+                    Text("Type").font(.caption).foregroundStyle(Theme.textSecondary)
                     Picker("", selection: $exerciseType) {
                         ForEach(ExerciseType.allCases) { type in
-                            Label(type.displayName, systemImage: type.icon).tag(type)
+                            Label(type.displayName,
+                                  systemImage: WorkoutIcons.icon(forType: type))
+                                .tag(type)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -851,13 +876,12 @@ struct CreateExerciseView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle(isOn: $isDaily) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Repeat every day")
-                                .font(.callout.weight(.medium))
+                            Text("Repeat every day").font(.callout.weight(.medium))
                             Text(isDaily
                                  ? "This exercise will appear fresh every day."
                                  : "This exercise will only appear today, then retire.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                     }
                     .toggleStyle(.switch)
@@ -866,7 +890,7 @@ struct CreateExerciseView: View {
 
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Body parts").font(.caption).foregroundStyle(.secondary)
+                        Text("Body parts").font(.caption).foregroundStyle(Theme.textSecondary)
                         Spacer()
                         if !selectedBodyParts.isEmpty {
                             Button("Clear") { selectedBodyParts.removeAll() }
@@ -905,7 +929,6 @@ struct CreateExerciseView: View {
                             .frame(width: 80)
                             .multilineTextAlignment(.trailing)
                     }
-
                 case .timer:
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
@@ -933,11 +956,10 @@ struct CreateExerciseView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Session timer")
-                                .font(.callout.weight(.medium))
+                            Text("Session timer").font(.callout.weight(.medium))
                             Text("Total workout window. Once started, it cannot be stopped.")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
                         TextField("", text: $sessionDurationText)
@@ -947,11 +969,9 @@ struct CreateExerciseView: View {
                     }
                     HStack(spacing: 6) {
                         ForEach(quickSessionDurations, id: \.1) { label, seconds in
-                            Button(label) {
-                                sessionDurationText = "\(seconds)"
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            Button(label) { sessionDurationText = "\(seconds)" }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                         }
                     }
                 }
@@ -971,22 +991,16 @@ struct CreateExerciseView: View {
 
             Spacer()
 
-            Button("Save & Add Another") {
-                save(stayOpen: true)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!confirmLock)
+            Button("Save & Add Another") { save(stayOpen: true) }
+                .buttonStyle(.bordered)
+                .disabled(!confirmLock)
 
-            Button("Save Exercise") {
-                save(stayOpen: false)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(!confirmLock)
-            .keyboardShortcut(.defaultAction)
+            Button("Save Exercise") { save(stayOpen: false) }
+                .buttonStyle(.borderedProminent)
+                .disabled(!confirmLock)
+                .keyboardShortcut(.defaultAction)
         }
     }
-
-    // MARK: - Catalog apply
 
     private func applyCatalog(_ catalogName: String) {
         guard let item = WorkoutCatalog.item(named: catalogName) else { return }
@@ -1008,8 +1022,6 @@ struct CreateExerciseView: View {
         }
 
         errorMessage = nil
-        // Reset the confirmation toggle — the user hasn't reviewed the
-        // prefilled form yet.
         confirmLock = false
     }
 
@@ -1086,7 +1098,6 @@ struct CreateExerciseView: View {
         sessionDurationText = "60"
         confirmLock = false
         selectedCatalogName = ""
-        // Keep: exerciseType, isDaily, selectedBodyParts
     }
 }
 
@@ -1100,17 +1111,19 @@ struct BodyPartChip: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 4) {
-                if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.caption2.weight(.bold))
-                }
+                Image(systemName: WorkoutIcons.icon(forBodyPart: label))
+                    .font(.caption2)
                 Text(label).font(.callout)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.12))
-            .foregroundStyle(isSelected ? .white : .primary)
+            .background(isSelected ? Theme.accentFill : Theme.surfaceSunken)
+            .foregroundStyle(isSelected ? .white : Theme.textPrimary)
             .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(isSelected ? Color.clear : Theme.border, lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
     }

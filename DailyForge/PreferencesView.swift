@@ -11,6 +11,7 @@ struct PreferencesView: View {
                 .tabItem { Label("Data", systemImage: "externaldrive") }
         }
         .frame(width: 680, height: 720)
+        .background(Theme.surfaceBase)
     }
 }
 
@@ -33,7 +34,7 @@ struct RemindersPreferences: View {
                 Section("Notification status") {
                     HStack {
                         Circle()
-                            .fill(notif.isWorking ? Color.green : Color.orange)
+                            .fill(notif.isWorking ? Theme.success : Theme.warning)
                             .frame(width: 8, height: 8)
                         Text("Status: \(notif.statusLabel)")
                             .font(.callout)
@@ -45,10 +46,10 @@ struct RemindersPreferences: View {
                     HStack {
                         Text("Last delivery:")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                         Text(notif.lastDeliveryResult)
                             .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.textSecondary)
                             .lineLimit(2)
                             .truncationMode(.middle)
                     }
@@ -56,7 +57,7 @@ struct RemindersPreferences: View {
                     if let error = notif.lastError {
                         Text(error)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Theme.danger)
                             .lineLimit(3)
                     }
 
@@ -80,7 +81,7 @@ struct EnforcementPreferences: View {
     @AppStorage(PreferenceKeys.graceMinutes) private var graceMinutes = 15
     @AppStorage(PreferenceKeys.enforceKiosk) private var enforceKiosk = true
 
-    @AppStorage(PreferenceKeys.overlayColorHex) private var overlayColorHex = "#FF3B30"
+    @AppStorage(PreferenceKeys.overlayColorHex) private var overlayColorHex = "#FF6B35"
     @AppStorage(PreferenceKeys.overlayMinOpacity) private var overlayMinOpacity: Double = 0.12
     @AppStorage(PreferenceKeys.overlayMaxOpacity) private var overlayMaxOpacity: Double = 0.30
     @AppStorage(PreferenceKeys.overlayPulseSeconds) private var overlayPulseSeconds: Double = 1.4
@@ -165,14 +166,14 @@ struct EnforcementPreferences: View {
                 Section("Swear phrase") {
                     Text("The phrase you must say out loud to seal a completed day.")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                     TextField("Phrase", text: $phraseDraft, axis: .vertical)
                         .lineLimit(2...4)
                         .textFieldStyle(.roundedBorder)
                         .onAppear { phraseDraft = swearPhrase }
                     if let phraseError {
-                        Text(phraseError).font(.caption).foregroundStyle(.red)
+                        Text(phraseError).font(.caption).foregroundStyle(Theme.danger)
                     }
                     HStack {
                         Button("Reset to Default") {
