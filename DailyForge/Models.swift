@@ -74,13 +74,17 @@ final class CompletionRecord {
     var id: UUID
     var exerciseID: UUID
     var dayKey: String
+    /// When the user tapped "Start Workout". Nil for records created via
+    /// the debug skip button or any future migration from older stores.
+    var startedAt: Date?
     var completedAt: Date
 
-    init(exerciseID: UUID, dayKey: String) {
+    init(exerciseID: UUID, dayKey: String, startedAt: Date? = nil, completedAt: Date = Date()) {
         self.id = UUID()
         self.exerciseID = exerciseID
         self.dayKey = dayKey
-        self.completedAt = Date()
+        self.startedAt = startedAt
+        self.completedAt = completedAt
     }
 }
 
@@ -97,9 +101,6 @@ final class DayLock {
     }
 }
 
-/// A voice-recorded oath that the day's exercises were genuinely completed.
-/// One per calendar day. Stored alongside the transcript of what the user
-/// said, so it can be reviewed later.
 @Model
 final class DailySwear {
     var id: UUID
@@ -157,8 +158,8 @@ final class Milestone {
 
     init(day: Int) {
         self.id = UUID()
-        self.unlockedAt = Date()
         self.day = day
+        self.unlockedAt = Date()
         self.userNotes = ""
     }
 }

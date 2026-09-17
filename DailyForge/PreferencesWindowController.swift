@@ -7,8 +7,9 @@ class PreferencesWindowController: NSWindowController, NSWindowDelegate {
         let hostingController = NSHostingController(rootView: PreferencesView())
         let window = NSWindow(contentViewController: hostingController)
         window.title = "DailyForge Preferences"
-        window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 580, height: 620))
+        window.styleMask = [.titled, .closable, .resizable]
+        window.setContentSize(NSSize(width: 680, height: 720))
+        window.minSize = NSSize(width: 620, height: 560)
         window.center()
         window.isReleasedWhenClosed = false
 
@@ -17,8 +18,6 @@ class PreferencesWindowController: NSWindowController, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // Force the enforcement layer to re-evaluate with the new prefs
-        // the instant the user dismisses the window.
         EnforcementController.shared.refresh()
         sender.orderOut(nil)
         return false

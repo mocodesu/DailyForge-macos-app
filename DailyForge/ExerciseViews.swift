@@ -304,28 +304,12 @@ struct ExerciseDetailSheet: View {
             Divider()
                 .padding(.vertical, 4)
 
-            // MARK: Debug shortcuts
-
             if !isCompletedToday {
                 HStack(spacing: 8) {
                     Button {
                         onComplete()
                     } label: {
                         Label("Skip Timer & Mark Done", systemImage: "forward.end.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.orange)
-
-                    Button {
-                        onStart()
-                        // Immediately complete after the session view appears
-                        // — this lets you test the flow visually without waiting.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                            onComplete()
-                        }
-                    } label: {
-                        Label("Flash & Done", systemImage: "bolt.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -549,19 +533,25 @@ private struct ManageRow: View {
 
 struct WorkoutSessionView: View {
     let exercise: Exercise
-    var onComplete: () -> Void
+    /// Called when the user confirms completion, with the timestamp of
+    /// when the session started.
+    var onComplete: (Date) -> Void
 
     @State private var endDate: Date
     @State private var now = Date()
     @State private var finished = false
 
+    private let startedAt: Date
+
     private let ticker = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
 
-    init(exercise: Exercise, onComplete: @escaping () -> Void) {
+    init(exercise: Exercise, onComplete: @escaping (Date) -> Void) {
         self.exercise = exercise
         self.onComplete = onComplete
         let total = TimeInterval(max(exercise.sessionDurationSeconds, 1))
-        _endDate = State(initialValue: Date().addingTimeInterval(total))
+        let start = Date()
+        self.startedAt = start
+        _endDate = State(initialValue: start.addingTimeInterval(total))
     }
 
     private var totalSeconds: Double { Double(max(exercise.sessionDurationSeconds, 1)) }
@@ -651,7 +641,7 @@ struct WorkoutSessionView: View {
     private var footer: some View {
         if finished {
             Button {
-                onComplete()
+                onComplete(startedAt)
             } label: {
                 Label("Mark Done", systemImage: "checkmark.circle.fill")
                     .frame(minWidth: 200)
@@ -670,6 +660,8 @@ struct WorkoutSessionView: View {
         }
     }
 }
+
+ 
 
 // MARK: - Create Sheet
 
@@ -979,13 +971,11 @@ struct CreateExerciseView: View {
 
             Spacer()
 
-           
             Button("Save & Add Another") {
                 save(stayOpen: true)
             }
             .buttonStyle(.bordered)
             .disabled(!confirmLock)
-           
 
             Button("Save Exercise") {
                 save(stayOpen: false)
@@ -1099,6 +1089,7 @@ struct CreateExerciseView: View {
         // Keep: exerciseType, isDaily, selectedBodyParts
     }
 }
+
 // MARK: - Reusable Chip
 
 struct BodyPartChip: View {

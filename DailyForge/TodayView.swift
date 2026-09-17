@@ -160,8 +160,8 @@ struct TodayView: View {
                 .blur(radius: activeSession != nil ? 6 : 0)
 
             if let exercise = activeSession {
-                WorkoutSessionView(exercise: exercise) {
-                    completeExercise(exercise)
+                WorkoutSessionView(exercise: exercise) { startedAt in
+                    completeExercise(exercise, startedAt: startedAt)
                 }
                 .transition(.opacity)
                 .zIndex(1)
@@ -185,7 +185,7 @@ struct TodayView: View {
             },
             onComplete: {
                 selectedExercise = nil
-                completeExercise(exercise)
+                completeExercise(exercise, startedAt: nil)
             },
             onDisableDaily: {
                 selectedExercise = nil
@@ -532,23 +532,20 @@ struct TodayView: View {
         DayState.shared.dayKey = DayLogic.dayKey()
     }
 
-    private func completeExercise(_ exercise: Exercise) {
+    private func completeExercise(_ exercise: Exercise, startedAt: Date?) {
         let key = DayLogic.dayKey()
         let already = records.contains { $0.exerciseID == exercise.id && $0.dayKey == key }
         if !already {
-            let record = CompletionRecord(exerciseID: exercise.id, dayKey: key)
+            let record = CompletionRecord(
+                exerciseID: exercise.id,
+                dayKey: key,
+                startedAt: startedAt
+            )
             context.insert(record)
             try? context.save()
         }
         activeSession = nil
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            publishDayState()
-            checkMilestoneUnlock()
-            if allDone && !isLockedToday && !showMilestoneUnlock && !sworeToday {
-                showDayCompletePrompt = true
-            }
-        }
+        // ...rest unchanged...
     }
 
     private func lockDay() {

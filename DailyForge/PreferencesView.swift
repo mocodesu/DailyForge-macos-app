@@ -7,8 +7,10 @@ struct PreferencesView: View {
                 .tabItem { Label("Reminders", systemImage: "bell.badge") }
             EnforcementPreferences()
                 .tabItem { Label("Enforcement", systemImage: "lock.shield") }
+            DataManagementView()
+                .tabItem { Label("Data", systemImage: "externaldrive") }
         }
-        .frame(width: 580, height: 620)
+        .frame(width: 680, height: 720)
     }
 }
 
@@ -105,7 +107,6 @@ struct EnforcementPreferences: View {
             Form {
                 Section("Daily reminder") {
                     Toggle("Enable daily reminder", isOn: $reminderEnabled)
-
                     HStack {
                         Text("Remind me at")
                         Spacer()
@@ -113,7 +114,6 @@ struct EnforcementPreferences: View {
                             .labelsHidden()
                             .disabled(!reminderEnabled)
                     }
-
                     HStack {
                         Text("Grace period")
                         Slider(value: Binding(
@@ -121,9 +121,7 @@ struct EnforcementPreferences: View {
                             set: { graceMinutes = Int($0) }
                         ), in: 1...60, step: 1)
                         .disabled(!reminderEnabled)
-                        Text("\(graceMinutes) min")
-                            .monospacedDigit()
-                            .frame(width: 60, alignment: .trailing)
+                        Text("\(graceMinutes) min").monospacedDigit().frame(width: 60, alignment: .trailing)
                     }
                 }
 
@@ -137,15 +135,12 @@ struct EnforcementPreferences: View {
                         get: { Color(hex: overlayColorHex) },
                         set: { overlayColorHex = $0.hexString }
                     ))
-
                     HStack {
                         Text("Faint opacity")
                         Slider(value: $overlayMinOpacity, in: 0.0...1.0, step: 0.02)
                         Text(String(format: "%.0f%%", overlayMinOpacity * 100))
-                            .monospacedDigit()
-                            .frame(width: 45, alignment: .trailing)
+                            .monospacedDigit().frame(width: 45, alignment: .trailing)
                     }
-
                     HStack {
                         Text("Bright opacity")
                         Slider(value: Binding(
@@ -153,18 +148,14 @@ struct EnforcementPreferences: View {
                             set: { overlayMaxOpacity = max($0, overlayMinOpacity + 0.02) }
                         ), in: 0.02...1.0, step: 0.02)
                         Text(String(format: "%.0f%%", overlayMaxOpacity * 100))
-                            .monospacedDigit()
-                            .frame(width: 45, alignment: .trailing)
+                            .monospacedDigit().frame(width: 45, alignment: .trailing)
                     }
-
                     HStack {
                         Text("Pulse speed")
                         Slider(value: $overlayPulseSeconds, in: 0.3...3.0, step: 0.1)
                         Text(String(format: "%.1fs", overlayPulseSeconds))
-                            .monospacedDigit()
-                            .frame(width: 45, alignment: .trailing)
+                            .monospacedDigit().frame(width: 45, alignment: .trailing)
                     }
-
                     Button("Preview Overlay (3s)") {
                         OverlayEnforcer.shared.preview(duration: 3)
                     }
@@ -176,35 +167,24 @@ struct EnforcementPreferences: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-
                     TextField("Phrase", text: $phraseDraft, axis: .vertical)
                         .lineLimit(2...4)
                         .textFieldStyle(.roundedBorder)
-                        .onAppear {
-                            phraseDraft = swearPhrase
-                        }
-
+                        .onAppear { phraseDraft = swearPhrase }
                     if let phraseError {
-                        Text(phraseError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
+                        Text(phraseError).font(.caption).foregroundStyle(.red)
                     }
-
                     HStack {
                         Button("Reset to Default") {
                             phraseDraft = Preferences.defaultSwearPhrase
                             phraseError = nil
                         }
                         .controlSize(.small)
-
                         Spacer()
-
-                        Button("Save Phrase") {
-                            savePhrase()
-                        }
-                        .controlSize(.small)
-                        .disabled(phraseDraft.trimmingCharacters(in: .whitespaces).isEmpty
-                                  || phraseDraft == swearPhrase)
+                        Button("Save Phrase") { savePhrase() }
+                            .controlSize(.small)
+                            .disabled(phraseDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                                      || phraseDraft == swearPhrase)
                     }
                 }
             }
@@ -216,18 +196,10 @@ struct EnforcementPreferences: View {
         let trimmed = phraseDraft
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .split(separator: " ")
-            .joined(separator: " ")   // collapse multiple spaces
-
+            .joined(separator: " ")
         let wordCount = trimmed.split(separator: " ").count
-        guard wordCount >= 3 else {
-            phraseError = "Phrase must be at least 3 words."
-            return
-        }
-        guard wordCount <= 40 else {
-            phraseError = "Phrase must be 40 words or fewer."
-            return
-        }
-
+        guard wordCount >= 3 else { phraseError = "Phrase must be at least 3 words."; return }
+        guard wordCount <= 40 else { phraseError = "Phrase must be 40 words or fewer."; return }
         phraseError = nil
         swearPhrase = trimmed
     }

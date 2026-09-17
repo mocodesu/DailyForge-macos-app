@@ -8,6 +8,8 @@ struct HistoryView: View {
 
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedDay: DayProgress?
+
     /// How many days back to display, starting from today.
     private let daysToShow = 30
 
@@ -49,13 +51,20 @@ struct HistoryView: View {
             content
         }
         .frame(width: 720, height: 660)
+        .sheet(item: $selectedDay) { day in
+            DayDetailView(
+                day: day,
+                exercises: exercises,
+                records: records
+            )
+        }
     }
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("History").font(.title.bold())
-                Text("Last \(daysToShow) days — today at the top")
+                Text("Last \(daysToShow) days — tap a circle for details")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -101,6 +110,12 @@ struct HistoryView: View {
                 ) {
                     ForEach(days) { day in
                         DayCircle(day: day)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                if day.total > 0 {
+                                    selectedDay = day
+                                }
+                            }
                     }
                 }
                 .padding(24)
@@ -162,18 +177,15 @@ struct DayCircle: View {
 
     private var ringView: some View {
         ZStack {
-            // Faint background ring
             Circle()
                 .stroke(Color.secondary.opacity(0.12), lineWidth: 6)
 
-            // Filled progress arc
             Circle()
                 .trim(from: 0, to: day.progress)
                 .stroke(ringColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.4), value: day.progress)
 
-            // Date number centered inside the ring
             Text(day.dayNumber)
                 .font(.system(size: 22, weight: .bold, design: .rounded))
                 .monospacedDigit()
@@ -201,4 +213,264 @@ struct DayCircle: View {
         if day.progress > 0 { return .orange }
         return .red.opacity(0.75)
     }
+}
+
+// MARK: - Day Detail
+
+struct DayDetailView: View {
+    let day: DayProgress
+    let exercises: [Exercise]
+    let records: [CompletionRecord]
+
+    @Environment(\.dismiss) private var dismiss
+
+    // MARK: - Derived
+
+    private var dayRecords: [CompletionRecord] {
+        records
+            .filter { $0.dayKey == day.id }
+            .sorted { $0.completedAt < $1.completedAt }
+    }
+
+    private var exerciseLookup: [UUID: Exercise] {
+        Dictionary(uniqueKeysWithValues: exercises.map { ($0.id, $0) })
+    }
+
+    /// Effective start of the day's workout — earliest startedAt, falling
+    /// back to the earliest completedAt for records without a start time.
+    private var firstStart: Date? {
+        let starts = dayRecords.compactMap(\.startedAt)
+        if let earliest = starts.min() { return earliest }
+        return dayRecords.first?.completedAt
+    }
+
+    private var lastCompletion: Date? {
+        dayRecords.map(\.completedAt).max()
+    }
+
+    /// Wall-clock time from first start to last completion.
+    private var totalWallClock: TimeInterval? {
+        guard let start = firstStart, let end = lastCompletion else { return nil }
+        return end.timeIntervalSince(start)
+    }
+
+    /// Sum of each exercise's own start → completion.
+    private var totalWorkTime: TimeInterval {
+        dayRecords.reduce(0) { sum, record in
+            guard let start = record.startedAt else { return sum }
+            return sum + record.completedAt.timeIntervalSince(start)
+        }
+    }
+
+    /// Wall-clock minus work time.
+    private var totalBreakTime: TimeInterval {
+        max(0, (totalWallClock ?? 0) - totalWorkTime)
+    }
+
+    private var hasStartTimes: Bool {
+        dayRecords.contains { $0.startedAt != nil }
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    summarySection
+                    timelineSection
+                }
+                .padding(24)
+            }
+        }
+        .frame(width: 640, height: 680)
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(day.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
+                    .font(.title2.bold())
+                Text(day.total > 0 ? "\(day.completed) of \(day.total) completed" : "No exercises scheduled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Close") { dismiss() }
+        }
+        .padding(20)
+    }
+
+    // MARK: - Summary
+
+    private var summarySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Session summary")
+                .font(.headline)
+
+            HStack(spacing: 12) {
+                summaryCard(
+                    title: "Total time",
+                    value: totalWallClock.map(formatLongDuration) ?? "—",
+                    subtitle: hasStartTimes ? "first start → last done" : "no start times recorded",
+                    tint: .accentColor
+                )
+                summaryCard(
+                    title: "Work time",
+                    value: formatLongDuration(totalWorkTime),
+                    subtitle: "sum of active sessions",
+                    tint: .green
+                )
+                summaryCard(
+                    title: "Break time",
+                    value: hasStartTimes ? formatLongDuration(totalBreakTime) : "—",
+                    subtitle: "time between exercises",
+                    tint: .orange
+                )
+            }
+
+            if hasStartTimes {
+                HStack(spacing: 20) {
+                    timePill(label: "Started", date: firstStart)
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(.tertiary)
+                    timePill(label: "Finished", date: lastCompletion)
+                }
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func summaryCard(title: String, value: String, subtitle: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(tint)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func timePill(label: String, date: Date?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(date.map { $0.formatted(date: .omitted, time: .shortened) } ?? "—")
+                .font(.callout.weight(.medium).monospacedDigit())
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // MARK: - Timeline
+
+    @ViewBuilder
+    private var timelineSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Per-exercise breakdown")
+                .font(.headline)
+
+            if dayRecords.isEmpty {
+                Text("No exercises were completed on this day.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(Array(dayRecords.enumerated()), id: \.element.id) { index, record in
+                        recordRow(index: index + 1, record: record)
+                    }
+                }
+            }
+        }
+    }
+
+    private func recordRow(index: Int, record: CompletionRecord) -> some View {
+        let exercise = exerciseLookup[record.exerciseID]
+        let duration = record.startedAt.map { record.completedAt.timeIntervalSince($0) }
+
+        return HStack(alignment: .top, spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.15))
+                    .frame(width: 28, height: 28)
+                Text("\(index)")
+                    .font(.caption.bold().monospacedDigit())
+                    .foregroundStyle(.green)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(exercise?.name ?? "Deleted exercise")
+                        .font(.body.weight(.medium))
+                    if let exercise = exercise, !exercise.isDaily {
+                        Text("ONE-OFF")
+                            .font(.caption2.weight(.bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.18))
+                            .foregroundStyle(.orange)
+                            .clipShape(Capsule())
+                    }
+                }
+
+                if let start = record.startedAt {
+                    Text("Started \(start.formatted(date: .omitted, time: .shortened)) → Done \(record.completedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Completed \(record.completedAt.formatted(date: .omitted, time: .shortened)) (no start time)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Spacer()
+
+            if let duration = duration {
+                Text(formatLongDuration(duration))
+                    .font(.callout.bold().monospacedDigit())
+                    .foregroundStyle(Color.accentColor)
+            } else {
+                Text("—")
+                    .font(.callout.bold().monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+// MARK: - Duration formatting
+
+/// Formats a TimeInterval as human-readable: "45s", "12m 30s", "1h 23m", etc.
+func formatLongDuration(_ interval: TimeInterval) -> String {
+    let total = Int(interval.rounded())
+    if total < 60 { return "\(total)s" }
+    if total < 3600 {
+        let m = total / 60
+        let s = total % 60
+        return s == 0 ? "\(m)m" : "\(m)m \(s)s"
+    }
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    return m == 0 ? "\(h)h" : "\(h)h \(m)m"
 }

@@ -12,6 +12,9 @@ struct DailyForgeApp: App {
     init() {
         Preferences.registerDefaults()
 
+        // Rolling auto-backup BEFORE the store is touched.
+        StoreBackup.autoBackupIfNeeded()
+
         let schema = Schema([
             Exercise.self,
             CompletionRecord.self,
@@ -27,24 +30,24 @@ struct DailyForgeApp: App {
             self.startupError = nil
             return
         } catch {
-            print("⚠️ ModelContainer init failed: \(error)")
-            print("⚠️ Wiping store and retrying…")
-        }
+            let diskError = error
+            print("❌ ModelContainer init failed: \(diskError)")
+            print("❌ Store NOT wiped. Open Preferences → Data to restore or wipe manually.")
 
-        Self.wipeStore()
-
-        do {
-            self.container = try ModelContainer(for: schema, configurations: [config])
-            self.startupError = nil
-        } catch {
-            print("❌ Still failing after wipe: \(error)")
             let memoryConfig = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-            if let memoryContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) {
-                self.container = memoryContainer
-                self.startupError = "Could not open the on-disk database. Running with temporary storage. \(error.localizedDescription)"
-            } else {
-                fatalError("Schema is invalid: \(error)")
+            guard let memoryContainer = try? ModelContainer(for: schema, configurations: [memoryConfig]) else {
+                fatalError("Schema is invalid: \(diskError)")
             }
+            self.container = memoryContainer
+            self.startupError = """
+            Could not open your store.
+
+            Your data is still on disk at ~/Library/Application Support/default.store — it has NOT been touched.
+
+            Open Preferences → Data (Cmd+,) to restore a backup, wipe the store, or export your data.
+
+            \(diskError.localizedDescription)
+            """
         }
     }
 
@@ -67,29 +70,6 @@ struct DailyForgeApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Preferences…") { PreferencesOpener.open() }
                     .keyboardShortcut(",", modifiers: .command)
-            }
-        }
-    }
-
-    private static func wipeStore() {
-        let fm = FileManager.default
-        if let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            removeStoreFiles(in: appSupport, named: "default", fm: fm)
-        }
-        if let bundleID = Bundle.main.bundleIdentifier {
-            let containerURL = fm.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Containers")
-                .appendingPathComponent(bundleID)
-                .appendingPathComponent("Data/Library/Application Support")
-            removeStoreFiles(in: containerURL, named: "default", fm: fm)
-        }
-    }
-
-    private static func removeStoreFiles(in directory: URL, named base: String, fm: FileManager) {
-        for suffix in ["", "-shm", "-wal"] {
-            let url = directory.appendingPathComponent("\(base).store\(suffix)")
-            if fm.fileExists(atPath: url.path) {
-                try? fm.removeItem(at: url)
             }
         }
     }
@@ -134,8 +114,6 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Blocks Quit while the overlay is engaged OR while the swear sheet
-    /// is open. The user must finish the swear to escape.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if OverlayEnforcer.shared.isActive || SwearSessionState.shared.isActive {
             NSSound(named: "Basso")?.play()
@@ -166,6 +144,11 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(openPreferences),
             keyEquivalent: ","
         ))
+        menu.addItem(NSMenuItem(
+            title: "Manage Data…",
+            action: #selector(openPreferences),
+            keyEquivalent: "d"
+        ))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(
             title: "Quit DailyForge",
@@ -173,7 +156,7 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: "q"
         ))
 
-        for item in menu.items { item.target = self }
+        for item in menu.items where item.action != nil { item.target = self }
         statusItem?.menu = menu
     }
 
@@ -204,16 +187,19 @@ struct StartupErrorView: View {
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 520)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
                 Button("Quit") { NSApp.terminate(nil) }
                     .keyboardShortcut(.cancelAction)
-                Button("Try Again") { NSApp.terminate(nil) }
-                    .buttonStyle(.borderedProminent)
+                Button("Manage Data…") {
+                    PreferencesOpener.open()
+                }
+                .buttonStyle(.borderedProminent)
             }
             .padding(.top, 8)
         }
         .padding(40)
-        .frame(minWidth: 480, minHeight: 320)
+        .frame(minWidth: 560, minHeight: 360)
     }
 }
