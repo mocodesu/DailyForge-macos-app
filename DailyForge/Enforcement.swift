@@ -46,7 +46,7 @@ class EnforcementController: ObservableObject {
         // rather than waiting for the 30-second tick.
         defaultsObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
-            object: nil,
+            object: UserDefaults.standard,
             queue: .main
         ) { [weak self] _ in
             self?.tick()
@@ -145,6 +145,12 @@ class EnforcementController: ObservableObject {
         if UserDefaults.standard.string(forKey: lastReminderKey) != fingerprint {
             UserDefaults.standard.set(fingerprint, forKey: lastReminderKey)
             fireReminder()
+        } else {
+            let graceSeconds = UserDefaults.standard.integer(forKey: PreferenceKeys.graceMinutes) * 60
+            let graceDeadline = reminderDate.addingTimeInterval(Double(graceSeconds))
+            if Date() >= graceDeadline {
+                engageIfNeeded()
+            }
         }
     }
 

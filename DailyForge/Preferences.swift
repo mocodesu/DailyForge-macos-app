@@ -48,6 +48,7 @@ struct Preferences {
             PreferenceKeys.swearPhraseIsDefault: true
         ])
     }
+
 }
 
 // MARK: - Unit System

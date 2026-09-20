@@ -1,220 +1,94 @@
 #!/bin/bash
-# ============================================================
-# DailyForge Login Item Installer
-# ============================================================
-#
-# Installs:
-#   1. A launcher script at
-#        ~/Library/Application Support/DailyForge/dailyforge-launcher.sh
-#      which decides whether DailyForge should actually be running.
-#
-#   2. A LaunchAgent at
-#        ~/Library/LaunchAgents/com.mocodesu.app.DailyForge.plist
-#      that runs the launcher:
-#        - once at login (RunAtLoad)
-#        - every 15 minutes (:00, :15, :30, :45)
-#
-# The launcher opens the app when:
-#   - the reminder is enabled and enforcement is on
-#   - the reminder time has already passed today, OR is within the next
-#     5 minutes (so the app can catch the reminder live)
-#   - at least one daily exercise is still incomplete for today
-#
-# Otherwise it exits silently. If the app is already running, it does
-# nothing — the pgrep guard at the top of the launcher handles that.
-# ============================================================
 
-set -e
-
-LABEL="com.mocodesu.app.DailyForge"
-BUNDLE_ID="com.mocodesu.app.DailyForge"
-APP_PATH="/Applications/DailyForge.app"
-SUPPORT_DIR="$HOME/Library/Application Support/DailyForge"
-LAUNCHER="$SUPPORT_DIR/dailyforge-launcher.sh"
-PLIST_PATH="$HOME/Library/LaunchAgents/$LABEL.plist"
-
-# ---------- Sanity checks ----------
-
-if [ ! -d "$APP_PATH" ]; then
-    echo "❌ $APP_PATH not found."
-    echo "   Copy your built DailyForge.app to /Applications first."
-    exit 1
-fi
-
-if [ ! -x "$APP_PATH/Contents/MacOS/DailyForge" ]; then
-    echo "❌ $APP_PATH/Contents/MacOS/DailyForge is missing or not executable."
-    exit 1
-fi
-
-# ---------- Write the launcher script ----------
-
-mkdir -p "$SUPPORT_DIR"
-mkdir -p "$HOME/Library/Logs"
-
-cat > "$LAUNCHER" <<'LAUNCHER_SCRIPT'
-#!/bin/bash
-# ============================================================
-# DailyForge launcher — decides whether to start the app based
-# on today's reminder state. Safe to run repeatedly.
-# ============================================================
+set -u
 
 BUNDLE_ID="com.mocodesu.app.DailyForge"
-APP_PATH="/Applications/DailyForge.app"
-STORE="$HOME/Library/Application Support/default.store"
+PREFS="$HOME/Library/Preferences/$BUNDLE_ID.plist"
+
 LOG="$HOME/Library/Logs/DailyForge-launcher.log"
 
-# How many seconds before the reminder time to launch the app early.
-# The app will wait and fire the reminder on its own tick.
-BUFFER_SECS=300
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
+    echo "[$(/bin/date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
 }
 
-# Rotate log if it grows past 200KB
-if [ -f "$LOG" ] && [ "$(stat -f%z "$LOG" 2>/dev/null || echo 0)" -gt 204800 ]; then
-    tail -n 400 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
-fi
 
-# 1. Already running? Nothing to do.
-if pgrep -x DailyForge > /dev/null; then
+log "============================================================"
+log "DailyForge launcher started"
+
+
+# ============================================================
+# 1. Is DailyForge already running?
+# ============================================================
+
+if /usr/bin/pgrep -x "DailyForge" >/dev/null 2>&1; then
+    log "DailyForge is already running. App-side enforcement evaluation is active."
     exit 0
 fi
 
-# 2. Preferences present?
-if ! defaults read "$BUNDLE_ID" > /dev/null 2>&1; then
+
+if [ ! -f "$PREFS" ]; then
+    log "Local preferences not found. Exiting."
     exit 0
 fi
 
-# 3. Reminder enabled?
-REMINDER_ENABLED=$(defaults read "$BUNDLE_ID" reminderEnabled 2>/dev/null || echo "0")
-if [ "$REMINDER_ENABLED" != "1" ]; then
-    exit 0
-fi
-
-# 4. Enforcement enabled?
-ENFORCE=$(defaults read "$BUNDLE_ID" enforceKiosk 2>/dev/null || echo "0")
-if [ "$ENFORCE" != "1" ]; then
-    exit 0
-fi
-
-# 5. Current time in seconds since midnight
-H=$(date +%H); M=$(date +%M); S=$(date +%S)
-NOW_SECS=$(( 10#$H * 3600 + 10#$M * 60 + 10#$S ))
-
-# 6. Reminder time in seconds since midnight
-REMINDER_SECS=$(defaults read "$BUNDLE_ID" reminderTimeSeconds 2>/dev/null || echo "68400")
-
-# 7. Launch window check.
-#    If the reminder is more than BUFFER_SECS away, skip. Otherwise
-#    (either it's already passed, or it's within the buffer window)
-#    we may need to launch.
-LAUNCH_THRESHOLD=$(( REMINDER_SECS - BUFFER_SECS ))
-if [ "$NOW_SECS" -lt "$LAUNCH_THRESHOLD" ]; then
-    REM_H=$(( REMINDER_SECS / 3600 ))
-    REM_M=$(( (REMINDER_SECS % 3600) / 60 ))
-    log "Reminder at ${REM_H}:$(printf %02d $REM_M) — not yet near. Skipping."
-    exit 0
-fi
-
-# 8. Store present?
-if [ ! -f "$STORE" ]; then
-    log "Store not found at $STORE. Skipping."
-    exit 0
-fi
-
-# 9. Query the store
-TODAY=$(date +%Y-%m-%d)
-
-DAILY_COUNT=$(sqlite3 "$STORE" \
-    "SELECT COUNT(*) FROM ZEXERCISE WHERE ZISDAILY = 1;" 2>/dev/null || echo "0")
-
-if [ -z "$DAILY_COUNT" ] || [ "$DAILY_COUNT" -eq 0 ]; then
-    log "No daily exercises configured. Skipping."
-    exit 0
-fi
-
-DONE_COUNT=$(sqlite3 "$STORE" \
-    "SELECT COUNT(*) FROM ZCOMPLETIONRECORD WHERE ZDAYKEY = '$TODAY';" 2>/dev/null || echo "0")
-
-if [ -z "$DONE_COUNT" ]; then DONE_COUNT=0; fi
-
-# 10. All done today?
-if [ "$DONE_COUNT" -ge "$DAILY_COUNT" ]; then
-    log "All done today ($DONE_COUNT/$DAILY_COUNT). Skipping."
-    exit 0
-fi
-
-# 11. Determine why we're launching for a clearer log line
-if [ "$NOW_SECS" -ge "$REMINDER_SECS" ]; then
-    log "Reminder passed, tasks remaining ($DONE_COUNT/$DAILY_COUNT). Launching DailyForge."
+REMINDER_ENABLED=$(
+    /usr/bin/plutil -extract reminderEnabled raw "$PREFS" 2>/dev/null || echo "false"
+)
+if [ "$REMINDER_ENABLED" = "true" ] || [ "$REMINDER_ENABLED" = "1" ]; then
+    REMINDER_ENABLED=1
 else
-    BUFFER_LEFT=$(( REMINDER_SECS - NOW_SECS ))
-    log "Reminder in ${BUFFER_LEFT}s, tasks remaining ($DONE_COUNT/$DAILY_COUNT). Launching early."
+    REMINDER_ENABLED=0
 fi
 
-open -a "$APP_PATH"
-LAUNCHER_SCRIPT
+REMINDER_SECS=$(
+    /usr/bin/plutil -extract reminderTimeSeconds raw "$PREFS" 2>/dev/null || echo "68400"
+)
 
-chmod +x "$LAUNCHER"
-echo "✅ Wrote launcher: $LAUNCHER"
+log "reminderEnabled=$REMINDER_ENABLED"
+log "reminderTimeSeconds=$REMINDER_SECS"
 
-# ---------- Write the LaunchAgent plist ----------
+if [ "$REMINDER_ENABLED" != "1" ]; then
+    log "Reminder is disabled. Exiting."
+    exit 0
+fi
 
-mkdir -p "$HOME/Library/LaunchAgents"
+if ! [[ "$REMINDER_SECS" =~ ^[0-9]+$ ]]; then
+    log "Invalid reminderTimeSeconds: $REMINDER_SECS"
+    exit 1
+fi
 
-cat > "$PLIST_PATH" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>$LABEL</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/bin/bash</string>
-        <string>$LAUNCHER</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <false/>
-    <key>ProcessType</key>
-    <string>Background</string>
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict><key>Minute</key><integer>0</integer></dict>
-        <dict><key>Minute</key><integer>15</integer></dict>
-        <dict><key>Minute</key><integer>30</integer></dict>
-        <dict><key>Minute</key><integer>45</integer></dict>
-    </array>
-    <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/DailyForge-launcher.out</string>
-    <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/DailyForge-launcher.err</string>
-</dict>
-</plist>
-EOF
+H=$(/bin/date +%H)
+M=$(/bin/date +%M)
+S=$(/bin/date +%S)
+NOW_SECS=$((10#$H * 3600 + 10#$M * 60 + 10#$S))
+LAUNCH_THRESHOLD=$((REMINDER_SECS - 300))
 
-echo "✅ Wrote plist: $PLIST_PATH"
+if [ "$NOW_SECS" -lt "$LAUNCH_THRESHOLD" ]; then
+    REM_H=$((REMINDER_SECS / 3600))
+    REM_M=$(((REMINDER_SECS % 3600) / 60))
+    log "Reminder at ${REM_H}:$(printf '%02d' "$REM_M"); outside launch window. Exiting."
+    exit 0
+fi
 
-# ---------- Reload the LaunchAgent ----------
+log "Reminder window reached; launching regardless of enforceKiosk."
 
-launchctl unload "$PLIST_PATH" 2>/dev/null || true
-launchctl load "$PLIST_PATH"
+if /usr/bin/open -b "$BUNDLE_ID"; then
+    log "LaunchServices accepted the launch request."
+else
+    log "ERROR: LaunchServices failed to launch DailyForge."
+    exit 1
+fi
 
-echo ""
-echo "✅ Installed and loaded $LABEL"
-echo ""
-echo "The launcher runs:"
-echo "  • once immediately at every login (RunAtLoad)"
-echo "  • every 15 minutes at :00, :15, :30, :45 (StartCalendarInterval)"
-echo ""
-echo "It opens DailyForge when:"
-echo "  • reminder is enabled and enforcement is on"
-echo "  • the reminder time has passed OR is within the next 5 minutes"
-echo "  • at least one daily exercise is still incomplete"
-echo ""
-echo "Logs:        tail -f ~/Library/Logs/DailyForge-launcher.log"
-echo "Run now:     bash '$LAUNCHER'"
-echo "Uninstall:   launchctl unload '$PLIST_PATH' && rm '$PLIST_PATH' '$LAUNCHER'"
+
+# Give macOS a moment to start the app.
+sleep 3
+
+
+if /usr/bin/pgrep -x "DailyForge" >/dev/null 2>&1; then
+    log "SUCCESS: DailyForge is running."
+else
+    log "WARNING: LaunchServices accepted the request but DailyForge is not running yet."
+fi
+
+exit 0
