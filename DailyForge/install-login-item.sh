@@ -4,6 +4,7 @@ set -u
 
 BUNDLE_ID="com.mocodesu.app.DailyForge"
 PREFS="$HOME/Library/Preferences/$BUNDLE_ID.plist"
+STORE="$HOME/Library/Application Support/default.store"
 
 LOG="$HOME/Library/Logs/DailyForge-launcher.log"
 
@@ -68,6 +69,45 @@ if [ "$NOW_SECS" -lt "$LAUNCH_THRESHOLD" ]; then
     REM_H=$((REMINDER_SECS / 3600))
     REM_M=$(((REMINDER_SECS % 3600) / 60))
     log "Reminder at ${REM_H}:$(printf '%02d' "$REM_M"); outside launch window. Exiting."
+    exit 0
+fi
+
+TODAY=$(/bin/date +%Y-%m-%d)
+
+if [ ! -f "$STORE" ]; then
+    log "DailyForge store not found. Exiting."
+    exit 0
+fi
+
+LOCKED=$(
+    /usr/bin/sqlite3 "$STORE" \
+    "SELECT COUNT(*) FROM ZDAYLOCK WHERE ZDAYKEY = '$TODAY';" \
+    2>/dev/null || echo "0"
+)
+if [ "$LOCKED" = "1" ]; then
+    log "Today is sealed. Nothing to launch."
+    exit 0
+fi
+
+DAILY_COUNT=$(
+    /usr/bin/sqlite3 "$STORE" \
+    "SELECT COUNT(*) FROM ZEXERCISE WHERE ZISDAILY = 1;" \
+    2>/dev/null || echo "0"
+)
+DONE_COUNT=$(
+    /usr/bin/sqlite3 "$STORE" \
+    "SELECT COUNT(DISTINCT e.Z_PK) FROM ZEXERCISE e JOIN ZCOMPLETIONRECORD r ON r.ZEXERCISEID = e.ZID WHERE e.ZISDAILY = 1 AND r.ZDAYKEY = '$TODAY';" \
+    2>/dev/null || echo "0"
+)
+
+if [ "$DAILY_COUNT" -eq 0 ]; then
+    log "No daily exercises configured. Nothing to launch."
+    exit 0
+fi
+
+log "Daily exercises: $DONE_COUNT/$DAILY_COUNT completed."
+if [ "$DONE_COUNT" -ge "$DAILY_COUNT" ]; then
+    log "All daily exercises are complete. Nothing to launch."
     exit 0
 fi
 
