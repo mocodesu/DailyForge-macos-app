@@ -21,7 +21,8 @@ struct DailyForgeApp: App {
             DailySwear.self,
             UserProfile.self,
             Milestone.self,
-            StreakFreeze.self
+            StreakFreeze.self,
+            SessionMood.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -121,6 +122,7 @@ class DailyForgeAppDelegate: NSObject, NSApplicationDelegate {
             NSSound(named: "Basso")?.play()
             return .terminateCancel
         }
+        FocusModeManager.shared.release()
         return .terminateNow
     }
 

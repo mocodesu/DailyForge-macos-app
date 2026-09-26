@@ -12,6 +12,7 @@ struct TodayView: View {
     @Query private var swears: [DailySwear]
     @Query private var milestones: [Milestone]
     @Query private var freezes: [StreakFreeze]
+    @Query private var moods: [SessionMood]
 
     @AppStorage(PreferenceKeys.minimumExercises) private var minimumExercises: Int = Preferences.defaultMinimumExercises
     @AppStorage(PreferenceKeys.restDaysRaw) private var restDaysRaw: String = Preferences.defaultRestDaysRaw
@@ -27,10 +28,12 @@ struct TodayView: View {
     @State private var showMilestoneUnlock = false
     @State private var showDayCompletePrompt = false
     @State private var showSwearSheet = false
+    @State private var showMoodSheet = false
 
     @State private var celebration: CelebrationKind?
     @State private var celebrationQueue: [CelebrationKind] = []
     @State private var pendingMilestoneCelebration: Int?
+    @State private var moodPromptPending = false
 
     @State private var showFreezeSheet = false
     @State private var showTokenEarnedOverlay = false
@@ -104,6 +107,11 @@ struct TodayView: View {
         let key = DayLogic.dayKey()
         return swears.contains { $0.dayKey == key }
     }
+    private var moodToday: SessionMood? {
+        let key = DayLogic.dayKey()
+        return moods.first { $0.dayKey == key }
+    }
+    private var hasMoodToday: Bool { moodToday != nil }
     private var completedToday: Set<UUID> {
         let key = DayLogic.dayKey()
         return Set(records.filter { $0.dayKey == key }.map(\.exerciseID))
@@ -232,11 +240,13 @@ struct TodayView: View {
             .sheet(isPresented: $showDayCompletePrompt, content: dayCompleteSheet)
             .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
             .sheet(isPresented: $showFreezeSheet, content: freezeSheet)
+            .sheet(isPresented: $showMoodSheet, content: moodSheet)
             .sheet(isPresented: $showSwearSheet) {
                 SwearView(dayKey: DayLogic.dayKey()) {
                     DispatchQueue.main.async {
                         publishDayState()
                         refreshFreezeEarnings(announce: true)
+                        moodPromptPending = !hasMoodToday
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                             enqueueCelebration(.day)
                         }
@@ -267,7 +277,7 @@ struct TodayView: View {
                 Button("Undo All", role: .destructive) { debugUndoAll() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("Removes every completion record, the day lock, and the voice swear for \(DayLogic.dayKey()). Exercises themselves are untouched.")
+                Text("Removes every completion record, the day lock, the voice swear, and today's mood for \(DayLogic.dayKey()). Exercises themselves are untouched.")
             }
             #endif
     }
@@ -397,6 +407,21 @@ struct TodayView: View {
         }
     }
 
+    @ViewBuilder
+    private func moodSheet() -> some View {
+        MoodLogSheet(
+            dayKey: DayLogic.dayKey(),
+            dayNumber: dailyExercises.count,
+            onSave: { mood, note in
+                saveMood(mood, note: note)
+                showMoodSheet = false
+            },
+            onSkip: {
+                showMoodSheet = false
+            }
+        )
+    }
+
     private func handleMinuteTick(_ now: Date) {
         today = now
         checkMilestoneUnlock()
@@ -419,6 +444,13 @@ struct TodayView: View {
         if allDone && !isLockedToday && !showMilestoneUnlock && !sworeToday {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 if !showMilestoneUnlock && !isLockedToday { showDayCompletePrompt = true }
+            }
+        }
+
+        // If the day is sealed and mood isn't logged, offer it once.
+        if isLockedToday && sworeToday && !hasMoodToday && !showMoodSheet {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                if !hasMoodToday { showMoodSheet = true }
             }
         }
     }
@@ -462,8 +494,11 @@ struct TodayView: View {
 
             Spacer()
 
-            freezeTokenBadge
+            if let mood = moodToday {
+                MoodChip(mood: mood.mood, compact: true)
+            }
 
+            freezeTokenBadge
             streakBadge
 
             Button(action: PreferencesOpener.open) {
@@ -578,12 +613,42 @@ struct TodayView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            Button {
-                celebration = nil
-                celebrationQueue.removeAll()
-                enqueueCelebration(.milestone(30))
+            Menu {
+                Button("Test 30d (bronze)") {
+                    fireTestMilestone(days: 30)
+                }
+                Button("Test 90d (silver)") {
+                    fireTestMilestone(days: 90)
+                }
+                Button("Test 180d (gold)") {
+                    fireTestMilestone(days: 180)
+                }
+                Button("Test 365d (legendary)") {
+                    fireTestMilestone(days: 365)
+                }
             } label: {
-                Label("Test 30d", systemImage: "trophy.fill")
+                Label("Test Milestone", systemImage: "trophy.fill")
+                    .font(.caption)
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 145)
+
+            Button {
+                showMoodSheet = true
+            } label: {
+                Label("Test Mood", systemImage: "face.smiling")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button {
+                FocusModeManager.shared.engage()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                    FocusModeManager.shared.release()
+                }
+            } label: {
+                Label("Test Focus", systemImage: "moon.stars.fill")
                     .font(.caption)
             }
             .buttonStyle(.bordered)
@@ -625,10 +690,23 @@ struct TodayView: View {
         let total = exercises.count
         var bits: [String] = ["\(records)/\(total) done", "min \(minimumExercises)"]
         if sworeToday { bits.append("sworn") }
+        if hasMoodToday { bits.append("mood") }
         if isLockedToday { bits.append("locked") }
         if isRestDay { bits.append("rest") }
         bits.append("❄\(StreakFreezeManager.tokensInBank)")
         return bits.joined(separator: " • ")
+    }
+
+    private func fireTestMilestone(days: Int) {
+        // Insert a real Milestone so the sheet path works end-to-end.
+        if !milestones.contains(where: { $0.day == days }) {
+            context.insert(Milestone(day: days))
+            try? context.save()
+        }
+        celebration = nil
+        celebrationQueue.removeAll()
+        pendingMilestoneCelebration = days
+        enqueueCelebration(.day)
     }
 
     private func debugCompleteAll() {
@@ -670,6 +748,9 @@ struct TodayView: View {
         for lock in dayLocks where lock.dayKey == key {
             context.delete(lock)
         }
+        for mood in moods where mood.dayKey == key {
+            context.delete(mood)
+        }
 
         do {
             try context.save()
@@ -679,10 +760,12 @@ struct TodayView: View {
 
         showDayCompletePrompt = false
         showSwearSheet = false
+        showMoodSheet = false
         celebration = nil
         celebrationQueue.removeAll()
         pendingMilestoneCelebration = nil
         bannerDismissed = false
+        moodPromptPending = false
 
         publishDayState()
     }
@@ -771,11 +854,20 @@ struct TodayView: View {
                 .font(.title3)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Day sealed.").font(.headline)
-                Text("You swore by voice. Well done.")
+                Text(hasMoodToday ? "Mood logged for today." : "Log how it felt to make recaps richer.")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
             Spacer()
+            if !hasMoodToday {
+                Button {
+                    showMoodSheet = true
+                } label: {
+                    Label("Log Mood", systemImage: "face.smiling")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
@@ -845,40 +937,48 @@ struct TodayView: View {
     }
 
     private var restDayState: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "moon.zzz.fill")
-                .font(.system(size: 72))
-                .foregroundStyle(Theme.accentFill)
+        ScrollView {
+            VStack(spacing: 20) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 64))
+                    .foregroundStyle(Theme.accentFill)
+                    .padding(.top, 24)
 
-            Text("Rest day").font(.largeTitle.bold())
+                Text("Rest day").font(.largeTitle.bold())
 
-            Text("\(restDayDescription) Recover, recharge — your streak is safe.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(Theme.textSecondary)
-                .frame(maxWidth: 460)
+                Text("\(restDayDescription) Recover, recharge — your streak is safe.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: 520)
 
-            if streak > 0 {
-                Text("\(streak) day streak")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Theme.accent)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Theme.accentSoft)
-                    .clipShape(Capsule())
+                if streak > 0 {
+                    Text("\(streak) day streak")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Theme.accentSoft)
+                        .clipShape(Capsule())
+                }
+
+                Text("Next workout day: \(nextWorkoutDayLabel)")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textTertiary)
+
+                Divider()
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 520)
+
+                RestDayRecoverySection(date: today)
+
+                Button("Edit schedule") { PreferencesOpener.open() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .padding(.top, 8)
+                    .padding(.bottom, 32)
             }
-
-            Text("Next workout day: \(nextWorkoutDayLabel)")
-                .font(.caption)
-                .foregroundStyle(Theme.textTertiary)
-                .padding(.top, 4)
-
-            Button("Edit schedule") { PreferencesOpener.open() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .padding(.top, 6)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 
     private var emptyState: some View {
@@ -905,6 +1005,7 @@ struct TodayView: View {
                 .font(.system(size: 72))
                 .foregroundStyle(Theme.success)
             Text("Done for today").font(.largeTitle.bold())
+
             if sworeToday {
                 Text("You swore by voice. The day is sealed.")
                     .foregroundStyle(Theme.textSecondary)
@@ -912,6 +1013,26 @@ struct TodayView: View {
                 Text("Come back tomorrow. Rest is part of the plan.")
                     .foregroundStyle(Theme.textSecondary)
             }
+
+            if let mood = moodToday {
+                HStack(spacing: 8) {
+                    Text("Today you felt:")
+                        .font(.callout)
+                        .foregroundStyle(Theme.textSecondary)
+                    MoodChip(mood: mood.mood, compact: false)
+                }
+                .padding(.top, 4)
+            } else {
+                Button {
+                    showMoodSheet = true
+                } label: {
+                    Label("Log today's mood", systemImage: "face.smiling")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.top, 4)
+            }
+
             Text("\(streak) day streak • Next milestone at \(nextMilestoneDay) days")
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
@@ -976,6 +1097,26 @@ struct TodayView: View {
         .padding(16)
     }
 
+    // MARK: - Mood
+
+    private func saveMood(_ mood: WorkoutMood, note: String) {
+        let key = DayLogic.dayKey()
+
+        // Replace any existing mood for today.
+        if let existing = moods.first(where: { $0.dayKey == key }) {
+            context.delete(existing)
+        }
+
+        let entry = SessionMood(dayKey: key, mood: mood, note: note)
+        context.insert(entry)
+        do {
+            try context.save()
+            NSSound(named: "Pop")?.play()
+        } catch {
+            print("⚠️ saveMood failed: \(error)")
+        }
+    }
+
     // MARK: - Freeze helpers
 
     private func refreshFreezeEarnings(announce: Bool) {
@@ -1011,6 +1152,7 @@ struct TodayView: View {
         let justFinished = celebration
         celebration = nil
 
+        // Day → milestone chain.
         if case .day = justFinished, let target = pendingMilestoneCelebration {
             pendingMilestoneCelebration = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -1019,18 +1161,23 @@ struct TodayView: View {
             return
         }
 
+        // Milestone → reflection sheet, then mood prompt if still pending.
         if case .milestone = justFinished {
-            guard pendingMilestone != nil else {
+            if pendingMilestone != nil {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    showMilestoneUnlock = true
+                }
+            } else {
                 playQueuedCelebration()
-                return
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                showMilestoneUnlock = true
+                maybeShowMood()
             }
             return
         }
 
         playQueuedCelebration()
+        if celebration == nil {
+            maybeShowMood()
+        }
     }
 
     private func playQueuedCelebration() {
@@ -1038,6 +1185,14 @@ struct TodayView: View {
         let next = celebrationQueue.removeFirst()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
             celebration = next
+        }
+    }
+
+    private func maybeShowMood() {
+        guard moodPromptPending, !hasMoodToday, !showMilestoneUnlock else { return }
+        moodPromptPending = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if !hasMoodToday { showMoodSheet = true }
         }
     }
 

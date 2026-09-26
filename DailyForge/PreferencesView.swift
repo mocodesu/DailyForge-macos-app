@@ -7,6 +7,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
     case reminders
     case training
     case enforcement
+    case focus
     case data
 
     var id: String { rawValue }
@@ -16,6 +17,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .reminders:   return "Reminders"
         case .training:    return "Training"
         case .enforcement: return "Enforcement"
+        case .focus:       return "Focus"
         case .data:        return "Data"
         }
     }
@@ -25,6 +27,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .reminders:   return "bell.badge.fill"
         case .training:    return "figure.run"
         case .enforcement: return "lock.shield.fill"
+        case .focus:       return "moon.stars.fill"
         case .data:        return "externaldrive.fill"
         }
     }
@@ -34,6 +37,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .reminders:   return Color(hex: "#FF6B35")
         case .training:    return Color(hex: "#06D6A0")
         case .enforcement: return Color(hex: "#9B5DE5")
+        case .focus:       return Color(hex: "#118AB2")
         case .data:        return Color(hex: "#118AB2")
         }
     }
@@ -43,6 +47,7 @@ enum PreferencesTab: String, CaseIterable, Identifiable {
         case .reminders:   return "Alerts and permissions"
         case .training:    return "Daily minimum and rest days"
         case .enforcement: return "Reminder, kiosk, overlay, and oath"
+        case .focus:       return "Session focus and Focus mode"
         case .data:        return "Backups, export, and store"
         }
     }
@@ -63,8 +68,6 @@ struct PreferencesView: View {
         .background(Theme.surfaceBase)
     }
 
-    // MARK: Header
-
     private var header: some View {
         VStack(spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
@@ -74,7 +77,6 @@ struct PreferencesView: View {
                     Text(selection.subtitle)
                         .font(.caption)
                         .foregroundStyle(Theme.textSecondary)
-                        .animation(.none, value: selection)
                 }
                 Spacer()
             }
@@ -87,8 +89,6 @@ struct PreferencesView: View {
         }
     }
 
-    // MARK: Content
-
     @ViewBuilder
     private var content: some View {
         switch selection {
@@ -98,6 +98,8 @@ struct PreferencesView: View {
             TrainingPreferences()
         case .enforcement:
             EnforcementPreferences()
+        case .focus:
+            FocusPreferences()
         case .data:
             DataManagementView()
         }
@@ -162,27 +164,48 @@ struct PreferenceTabBar: View {
     }
 }
 
-// MARK: - Shared Card
+// MARK: - Scroll wrapper
+
+struct PreferencesScroll<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                content
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+    }
+}
+
+// MARK: - Card
 
 struct PreferenceCard<Content: View>: View {
     let icon: String
     let tint: Color
     let title: String
     let subtitle: String?
-    @ViewBuilder var content: () -> Content
+    let content: Content
 
     init(
         icon: String,
         tint: Color,
         title: String,
         subtitle: String? = nil,
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: () -> Content
     ) {
         self.icon = icon
         self.tint = tint
         self.title = title
         self.subtitle = subtitle
-        self.content = content
+        self.content = content()
     }
 
     var body: some View {
@@ -204,13 +227,14 @@ struct PreferenceCard<Content: View>: View {
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                content()
+                content
             }
         }
         .padding(16)
@@ -225,12 +249,22 @@ struct PreferenceCard<Content: View>: View {
     }
 }
 
-// MARK: - Setting Row
+// MARK: - Setting row
 
 struct SettingRow<Trailing: View>: View {
     let title: String
-    var subtitle: String? = nil
-    @ViewBuilder var trailing: () -> Trailing
+    let subtitle: String?
+    let trailing: Trailing
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -246,7 +280,7 @@ struct SettingRow<Trailing: View>: View {
                 }
             }
             Spacer(minLength: 12)
-            trailing()
+            trailing
         }
     }
 }
@@ -281,23 +315,6 @@ struct SliderRow: View {
             Slider(value: $value, in: range, step: step)
                 .tint(tint)
         }
-    }
-}
-
-// MARK: - Shared scroll wrapper
-
-struct PreferencesScroll<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                content()
-            }
-            .padding(22)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .scrollBounceBehavior(.basedOnSize)
     }
 }
 
@@ -529,7 +546,7 @@ struct TrainingPreferences: View {
     }
 }
 
-// MARK: - Weekday Chip Row (shared with onboarding)
+// MARK: - Weekday chips
 
 struct WeekdayChipRow: View {
     let selection: Set<Int>
@@ -631,8 +648,6 @@ struct EnforcementPreferences: View {
             swearCard
         }
     }
-
-    // MARK: Cards
 
     private var reminderCard: some View {
         PreferenceCard(
@@ -847,8 +862,6 @@ struct EnforcementPreferences: View {
         }
     }
 
-    // MARK: Actions
-
     private func savePhrase() {
         let trimmed = phraseDraft
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -859,5 +872,160 @@ struct EnforcementPreferences: View {
         guard wordCount <= 40 else { phraseError = "Phrase must be 40 words or fewer."; return }
         phraseError = nil
         swearPhrase = trimmed
+    }
+}
+
+// MARK: - Focus
+
+struct FocusPreferences: View {
+    @AppStorage(PreferenceKeys.focusModeEnabled) private var focusEnabled: Bool = false
+    @AppStorage(PreferenceKeys.focusHideDockAndMenuBar) private var hideDockAndMenuBar: Bool = true
+    @AppStorage(PreferenceKeys.focusShortcutName) private var shortcutName: String = ""
+
+    @State private var shortcutDraft: String = ""
+    @State private var testStatus: String?
+
+    private var tint: Color { PreferencesTab.focus.tint }
+
+    var body: some View {
+        PreferencesScroll {
+            PreferenceCard(
+                icon: "moon.stars.fill",
+                tint: tint,
+                title: "Session focus",
+                subtitle: "What happens during a workout session."
+            ) {
+                SettingRow(
+                    title: "Enable Focus mode",
+                    subtitle: "The app enters a distraction-free state while a session is running."
+                ) {
+                    Toggle("", isOn: $focusEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(tint)
+                }
+                RowDivider()
+                SettingRow(
+                    title: "Hide Dock & Menu Bar",
+                    subtitle: "Removes chrome from the edges of the screen."
+                ) {
+                    Toggle("", isOn: $hideDockAndMenuBar)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .tint(tint)
+                        .disabled(!focusEnabled)
+                }
+            }
+
+            PreferenceCard(
+                icon: "wand.and.stars",
+                tint: tint,
+                title: "Focus Shortcut",
+                subtitle: "Optionally run a macOS Shortcut when a session starts. Create one in the Shortcuts app, then paste its name here."
+            ) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Shortcut name")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textCase(.uppercase)
+                        .tracking(0.4)
+                    TextField("e.g. Workout Focus", text: $shortcutDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .onAppear { shortcutDraft = shortcutName }
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        saveShortcut()
+                    } label: {
+                        Label("Save", systemImage: "checkmark")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(shortcutDraft.trimmingCharacters(in: .whitespaces) == shortcutName)
+
+                    Button {
+                        shortcutDraft = ""
+                        saveShortcut()
+                    } label: {
+                        Label("Clear", systemImage: "xmark")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(shortcutName.isEmpty && shortcutDraft.isEmpty)
+
+                    Spacer()
+
+                    Button {
+                        testFocus()
+                    } label: {
+                        Label("Test Focus (3s)", systemImage: "play.fill")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(!focusEnabled)
+                }
+
+                if let testStatus {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textTertiary)
+                        Text(testStatus)
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+
+            PreferenceCard(
+                icon: "questionmark.circle.fill",
+                tint: Theme.textSecondary,
+                title: "How it works",
+                subtitle: nil
+            ) {
+                VStack(alignment: .leading, spacing: 10) {
+                    InfoLine(text: "Focus mode engages when you tap Start Workout and releases when the session ends.")
+                    InfoLine(text: "If you have a Shortcut configured, it runs on session start. Focus state is not automatically reverted — add a matching shortcut or manual trigger if you want symmetric Focus toggling.")
+                    InfoLine(text: "Dock and Menu Bar are hidden for the duration. Everything is restored on exit.")
+                }
+            }
+        }
+    }
+
+    private func saveShortcut() {
+        let trimmed = shortcutDraft.trimmingCharacters(in: .whitespaces)
+        shortcutName = trimmed
+        shortcutDraft = trimmed
+        testStatus = trimmed.isEmpty ? "Shortcut cleared." : "Shortcut saved: \(trimmed)"
+    }
+
+    private func testFocus() {
+        FocusModeManager.shared.engage()
+        testStatus = "Focus mode engaged for 3 seconds…"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            FocusModeManager.shared.release()
+            testStatus = "Focus mode released."
+        }
+    }
+}
+
+private struct InfoLine: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 4))
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.top, 7)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

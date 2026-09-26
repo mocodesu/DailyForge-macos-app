@@ -579,9 +579,6 @@ struct WorkoutSessionView: View {
     @State private var now = Date()
     @State private var finished = false
 
-    /// The last whole second we played a tick for. Used to detect when the
-    /// displayed countdown value has changed, since the ticker fires twice
-    /// per second.
     @State private var lastTickSecond: Int = -1
 
     private let startedAt: Date
@@ -617,20 +614,21 @@ struct WorkoutSessionView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onAppear {
-            // Initial "start" sound when the sheet appears.
+            FocusModeManager.shared.engage()
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 NSSound(named: "Pop")?.play()
                 lastTickSecond = Int(ceil(remaining))
             }
+        }
+        .onDisappear {
+            FocusModeManager.shared.release()
         }
         .onReceive(ticker) { date in
             now = date
             let currentSecond = Int(ceil(remaining))
 
             if !finished {
-                // Play a tick each time the displayed second changes.
-                // Skips the very first value so it doesn't double up with
-                // the "Pop" start sound.
                 if currentSecond != lastTickSecond, lastTickSecond >= 0 {
                     lastTickSecond = currentSecond
                     if currentSecond > 0 {

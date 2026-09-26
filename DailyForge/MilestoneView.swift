@@ -21,6 +21,7 @@ struct MilestoneView: View {
     @State private var isAnalyzing = false
     @State private var aiError: String?
     @State private var errorMessage: String?
+    @State private var shareStatus: String?
 
     var body: some View {
         ScrollView {
@@ -32,11 +33,13 @@ struct MilestoneView: View {
                 if let aiSummary { reflectionBox(aiSummary) }
                 if let aiError { Text(aiError).foregroundStyle(.red).font(.callout) }
                 if let errorMessage { Text(errorMessage).foregroundStyle(.red).font(.callout) }
+                if let shareStatus { shareBanner(shareStatus) }
+                shareCardSection
                 actionsRow
             }
             .padding(28)
         }
-        .frame(width: 640, height: 740)
+        .frame(width: 640, height: 780)
         .onAppear {
             notes = milestone.userNotes
             if let w = milestone.currentWeightKg {
@@ -114,6 +117,51 @@ struct MilestoneView: View {
         }
     }
 
+    private var shareCardSection: some View {
+        GroupBox("Share card") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Generate a beautiful 1080×1080 card of this milestone. Perfect for sharing or saving.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    Button {
+                        copyCardToClipboard()
+                    } label: {
+                        Label("Copy Image", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Button {
+                        saveCardToFile()
+                    } label: {
+                        Label("Save as PNG…", systemImage: "square.and.arrow.down")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Spacer()
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private func shareBanner(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(Theme.success)
+            Text(text)
+                .font(.callout)
+            Spacer()
+        }
+        .padding(10)
+        .background(Theme.successSoft)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     private var actionsRow: some View {
         HStack {
             Button("Later") { dismiss() }
@@ -171,6 +219,34 @@ struct MilestoneView: View {
                 }
             }
             Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Share Card Actions
+
+    private func copyCardToClipboard() {
+        let ok = MilestoneCardRenderer.copyToClipboard(
+            profile: profile,
+            milestone: milestone,
+            unitSystem: unitSystem
+        )
+        shareStatus = ok
+            ? "Card copied to clipboard."
+            : "Could not render the share card."
+    }
+
+    private func saveCardToFile() {
+        switch MilestoneCardRenderer.save(
+            profile: profile,
+            milestone: milestone,
+            unitSystem: unitSystem
+        ) {
+        case .saved(let url):
+            shareStatus = "Saved to \(url.lastPathComponent)"
+        case .cancelled:
+            break
+        case .failed(let message):
+            shareStatus = "Save failed: \(message)"
         }
     }
 

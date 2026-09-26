@@ -1271,6 +1271,11 @@ struct DayDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Query private var freezes: [StreakFreeze]
+    @Query private var moods: [SessionMood]
+
+    private var moodRecord: SessionMood? {
+        moods.first { $0.dayKey == day.id }
+    }
 
     private var freezeRecord: StreakFreeze? {
         freezes.first { $0.dayKey == day.id }
@@ -1322,6 +1327,9 @@ struct DayDetailView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    if let mood = moodRecord {
+                        moodSection(mood)
+                    }
                     if let freeze = freezeRecord {
                         frozenBanner(freeze)
                     }
@@ -1331,7 +1339,7 @@ struct DayDetailView: View {
                 .padding(24)
             }
         }
-        .frame(width: 640, height: 680)
+        .frame(width: 640, height: 720)
         .background(Theme.surfaceBase)
     }
 
@@ -1353,6 +1361,59 @@ struct DayDetailView: View {
     private var headerSubtitle: String {
         if day.isFrozen { return "Protected by freeze token" }
         return day.total > 0 ? "\(day.completed) of \(day.total) completed" : "No exercises scheduled"
+    }
+
+    // MARK: Mood
+
+    private func moodSection(_ mood: SessionMood) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(mood.mood.emoji)
+                    .font(.system(size: 40))
+                    .padding(8)
+                    .background(
+                        Circle()
+                            .fill(mood.mood.tint.opacity(0.16))
+                    )
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mood.mood.label)
+                        .font(.title3.bold())
+                        .foregroundStyle(mood.mood.tint)
+                    Text(mood.mood.descriptor)
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+
+                Spacer()
+
+                Text(mood.loggedAt.formatted(date: .omitted, time: .shortened))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Theme.textTertiary)
+            }
+
+            if !mood.note.isEmpty {
+                Text("“\(mood.note)”")
+                    .font(.callout.italic())
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.surfaceSunken)
+                    )
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(mood.mood.tint.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(mood.mood.tint.opacity(0.30), lineWidth: 0.5)
+        )
     }
 
     private func frozenBanner(_ freeze: StreakFreeze) -> some View {

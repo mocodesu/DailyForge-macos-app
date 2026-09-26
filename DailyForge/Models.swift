@@ -74,8 +74,6 @@ final class CompletionRecord {
     var id: UUID
     var exerciseID: UUID
     var dayKey: String
-    /// When the user tapped "Start Workout". Nil for records created via
-    /// the debug skip button or any future migration from older stores.
     var startedAt: Date?
     var completedAt: Date
 
@@ -122,8 +120,6 @@ final class DailySwear {
 final class UserProfile {
     var id: UUID
     var displayName: String
-    /// Age in years. Defaults to 0 for records created before this field
-    /// existed; the UI treats 0 as "not set".
     var age: Int = 0
     var startDate: Date
     var initialWeightKg: Double
@@ -172,11 +168,8 @@ final class Milestone {
 @Model
 final class StreakFreeze {
     var id: UUID
-    /// Calendar day key (`yyyy-MM-dd`) of the day that was frozen.
     var dayKey: String
-    /// When the freeze token was spent.
     var usedAt: Date
-    /// Optional user note explaining why they froze that day.
     var note: String
 
     init(dayKey: String, note: String = "") {
@@ -184,5 +177,27 @@ final class StreakFreeze {
         self.dayKey = dayKey
         self.usedAt = Date()
         self.note = note
+    }
+}
+
+@Model
+final class SessionMood {
+    var id: UUID
+    var dayKey: String
+    var moodRaw: String
+    var note: String
+    var loggedAt: Date
+
+    var mood: WorkoutMood {
+        get { WorkoutMood(rawValue: moodRaw) ?? .fine }
+        set { moodRaw = newValue.rawValue }
+    }
+
+    init(dayKey: String, mood: WorkoutMood, note: String = "") {
+        self.id = UUID()
+        self.dayKey = dayKey
+        self.moodRaw = mood.rawValue
+        self.note = note
+        self.loggedAt = Date()
     }
 }
