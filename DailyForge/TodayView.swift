@@ -763,6 +763,8 @@ struct TodayView: View {
         let justFinished = celebration
         celebration = nil
 
+        // If the day celebration just ended and a milestone is waiting,
+        // chain straight into it.
         if case .day = justFinished, let target = pendingMilestoneCelebration {
             pendingMilestoneCelebration = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -771,21 +773,33 @@ struct TodayView: View {
             return
         }
 
+        // If a milestone celebration just ended, only open the reflection
+        // sheet when there's actually a milestone to reflect on. Firing the
+        // celebration directly (e.g. from the DEBUG "Test 30d" button)
+        // doesn't insert one, so this guard prevents an empty sheet.
         if case .milestone = justFinished {
+            guard pendingMilestone != nil else {
+                // Nothing to reflect on — drain the queue if anything is
+                // waiting and return.
+                playQueuedCelebration()
+                return
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 showMilestoneUnlock = true
             }
             return
         }
 
-        if !celebrationQueue.isEmpty {
-            let next = celebrationQueue.removeFirst()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                celebration = next
-            }
-        }
+        playQueuedCelebration()
     }
 
+    private func playQueuedCelebration() {
+        guard !celebrationQueue.isEmpty else { return }
+        let next = celebrationQueue.removeFirst()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+            celebration = next
+        }
+    }
     // MARK: - State
 
     private func publishDayState() {
