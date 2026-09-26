@@ -23,6 +23,10 @@ enum PreferenceKeys {
     static let minimumExercises = "minimumExercises"
     static let restDaysRaw = "restDaysRaw"
 
+    // Streak freeze tokens
+    static let freezeTokensInBank = "freezeTokensInBank"
+    static let freezeLastMilestoneAwarded = "freezeLastMilestoneAwarded"
+
     static let swearPhrase = "swearPhrase"
     static let swearPhraseIsDefault = "swearPhraseIsDefault"
 }
@@ -55,6 +59,9 @@ struct Preferences {
 
             PreferenceKeys.minimumExercises: defaultMinimumExercises,
             PreferenceKeys.restDaysRaw: defaultRestDaysRaw,
+
+            PreferenceKeys.freezeTokensInBank: 0,
+            PreferenceKeys.freezeLastMilestoneAwarded: 0,
 
             PreferenceKeys.swearPhrase: defaultSwearPhrase,
             PreferenceKeys.swearPhraseIsDefault: true

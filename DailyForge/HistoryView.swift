@@ -22,7 +22,10 @@ struct HistoryView: View {
     let exercises: [Exercise]
     let records: [CompletionRecord]
 
+    @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+
+    @Query private var freezes: [StreakFreeze]
 
     @State private var sheet: HistorySheet?
 
@@ -40,8 +43,8 @@ struct HistoryView: View {
         return Set(parsed.prefix(Preferences.maxRestDays))
     }
 
-    private var targetDaysPerWeek: Int {
-        max(1, 7 - restDays.count)
+    private var frozenKeys: Set<String> {
+        Set(freezes.map(\.dayKey))
     }
 
     // MARK: Days
@@ -63,13 +66,15 @@ struct HistoryView: View {
         let due = DayLogic.activeExercises(from: exercises, on: date)
         let completedThatDay = Set(records.filter { $0.dayKey == key }.map(\.exerciseID))
         let done = due.filter { completedThatDay.contains($0.id) }.count
+        let isFrozen = frozenKeys.contains(key)
 
         return DayProgress(
             id: key,
             date: date,
             completed: done,
             total: due.count,
-            isToday: Calendar.current.isDateInToday(date)
+            isToday: Calendar.current.isDateInToday(date),
+            isFrozen: isFrozen
         )
     }
 
@@ -111,6 +116,11 @@ struct HistoryView: View {
             guard dateStart <= today else { continue }
 
             let key = DayLogic.dayKey(date)
+            if frozenKeys.contains(key) {
+                daysCompleted += 1
+                continue
+            }
+
             let due = DayLogic.activeExercises(from: exercises, on: date)
             guard !due.isEmpty else { continue }
 
@@ -290,6 +300,16 @@ struct HistoryView: View {
                 Text("Daily breakdown")
                     .font(.headline)
                 Spacer()
+                if !frozenKeys.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "snowflake")
+                            .font(.caption)
+                            .foregroundStyle(Color(hex: "#118AB2"))
+                        Text("frozen")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
                 Text("Tap a circle for details")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
@@ -303,7 +323,7 @@ struct HistoryView: View {
                     DayCircle(day: day)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            if day.total > 0 { sheet = .day(day) }
+                            if day.total > 0 || day.isFrozen { sheet = .day(day) }
                         }
                 }
             }
@@ -428,10 +448,10 @@ struct WeekDetailSheet: View {
     let records: [CompletionRecord]
 
     @Environment(\.dismiss) private var dismiss
+    @Query private var freezes: [StreakFreeze]
 
     private var calendar: Calendar { Calendar.current }
-
-    // MARK: Computed Data
+    private var frozenKeys: Set<String> { Set(freezes.map(\.dayKey)) }
 
     private var dayInfos: [WeekDayInfo] {
         var result: [WeekDayInfo] = []
@@ -443,6 +463,7 @@ struct WeekDetailSheet: View {
             let isRest = DayLogic.isRestDay(date)
             let isFuture = dateStart > today
             let key = DayLogic.dayKey(date)
+            let isFrozen = frozenKeys.contains(key)
 
             let due = DayLogic.activeExercises(from: exercises, on: date)
             let dayRecords = records.filter { $0.dayKey == key }
@@ -461,6 +482,7 @@ struct WeekDetailSheet: View {
                 date: date,
                 weekday: calendar.component(.weekday, from: date),
                 isRestDay: isRest,
+                isFrozen: isFrozen,
                 isFuture: isFuture,
                 isToday: calendar.isDateInToday(date),
                 dueCount: due.count,
@@ -513,6 +535,7 @@ struct WeekDetailSheet: View {
         let nonRestDays = dayInfos.filter { !$0.isRestDay }
         let targetDays = nonRestDays.count
         let completedDays = nonRestDays.filter { $0.isComplete }.count
+        let frozenCount = dayInfos.filter(\.isFrozen).count
         let workSeconds = dayInfos.reduce(0) { $0 + $1.workSeconds }
         let totalCompletions = dayInfos.reduce(0) { $0 + $1.records.count }
         let avgSession = completedDays > 0 ? workSeconds / Double(completedDays) : 0
@@ -528,12 +551,11 @@ struct WeekDetailSheet: View {
             totalCompletions: totalCompletions,
             avgSessionSeconds: avgSession,
             restDaysInWeek: dayInfos.filter(\.isRestDay).count,
+            frozenDaysInWeek: frozenCount,
             bestDay: bestDay,
             missedDays: missedDays
         )
     }
-
-    // MARK: Body
 
     var body: some View {
         VStack(spacing: 0) {
@@ -556,8 +578,6 @@ struct WeekDetailSheet: View {
         .background(Theme.surfaceBase)
     }
 
-    // MARK: Header
-
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
@@ -572,8 +592,6 @@ struct WeekDetailSheet: View {
         }
         .padding(20)
     }
-
-    // MARK: Hero
 
     private var heroSection: some View {
         HStack(spacing: 22) {
@@ -645,8 +663,6 @@ struct WeekDetailSheet: View {
         .frame(width: 116, height: 116)
     }
 
-    // MARK: Stats Grid
-
     private var statsGrid: some View {
         HStack(spacing: 12) {
             statTile(
@@ -668,10 +684,10 @@ struct WeekDetailSheet: View {
                 tint: Theme.success
             )
             statTile(
-                icon: "moon.zzz.fill",
-                title: "Rest days",
-                value: "\(totals.restDaysInWeek)",
-                tint: Theme.textSecondary
+                icon: "snowflake",
+                title: "Frozen",
+                value: "\(totals.frozenDaysInWeek)",
+                tint: Color(hex: "#118AB2")
             )
         }
     }
@@ -704,8 +720,6 @@ struct WeekDetailSheet: View {
         )
     }
 
-    // MARK: Daily Breakdown
-
     private var dailyBreakdownSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -733,8 +747,6 @@ struct WeekDetailSheet: View {
         }
     }
 
-    // MARK: Exercise Performance
-
     private var exercisePerformanceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
@@ -752,8 +764,6 @@ struct WeekDetailSheet: View {
             }
         }
     }
-
-    // MARK: Highlights
 
     private var highlightsSection: some View {
         let insights = buildInsights()
@@ -785,6 +795,15 @@ struct WeekDetailSheet: View {
                 tint: Theme.warning,
                 title: "\(totals.missedDays) missed day\(totals.missedDays == 1 ? "" : "s")",
                 body: "One missed day is noise. Two is a pattern — aim for a clean week ahead."
+            ))
+        }
+
+        if totals.frozenDaysInWeek > 0 {
+            items.append(WeekInsight(
+                icon: "snowflake",
+                tint: Color(hex: "#118AB2"),
+                title: "\(totals.frozenDaysInWeek) day\(totals.frozenDaysInWeek == 1 ? "" : "s") frozen",
+                body: "You spent \(totals.frozenDaysInWeek) freeze token\(totals.frozenDaysInWeek == 1 ? "" : "s") to protect your streak. Use them wisely."
             ))
         }
 
@@ -861,6 +880,7 @@ struct WeekDayInfo: Identifiable {
     let date: Date
     let weekday: Int
     let isRestDay: Bool
+    let isFrozen: Bool
     let isFuture: Bool
     let isToday: Bool
     let dueCount: Int
@@ -869,10 +889,12 @@ struct WeekDayInfo: Identifiable {
     let records: [CompletionRecord]
 
     var isComplete: Bool {
-        !isRestDay && !isFuture && dueCount > 0 && completedCount == dueCount
+        if isFrozen { return true }
+        return !isRestDay && !isFuture && dueCount > 0 && completedCount == dueCount
     }
 
     var progress: Double {
+        if isFrozen { return 1.0 }
         guard dueCount > 0 else { return 0 }
         return min(1.0, Double(completedCount) / Double(dueCount))
     }
@@ -908,6 +930,7 @@ struct WeekTotals {
     let totalCompletions: Int
     let avgSessionSeconds: TimeInterval
     let restDaysInWeek: Int
+    let frozenDaysInWeek: Int
     let bestDay: WeekDayInfo?
     let missedDays: Int
 }
@@ -937,11 +960,21 @@ private struct WeekDayTile: View {
                     .stroke(Theme.surfaceSunken, lineWidth: 4)
 
                 if day.isRestDay {
-                    Circle()
-                        .fill(Theme.surfaceSunken)
+                    Circle().fill(Theme.surfaceSunken)
                     Image(systemName: "moon.zzz.fill")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
+                } else if day.isFrozen {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "#118AB2"), Color(hex: "#06D6A0")],
+                                startPoint: .top, endPoint: .bottom
+                            )
+                        )
+                    Image(systemName: "snowflake")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
                 } else if day.isFuture {
                     Circle()
                         .stroke(
@@ -984,6 +1017,10 @@ private struct WeekDayTile: View {
                     Text("rest")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Theme.textTertiary)
+                } else if day.isFrozen {
+                    Text("frozen")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#118AB2"))
                 } else if day.isFuture {
                     Text("—")
                         .font(.system(size: 9))
@@ -1132,8 +1169,10 @@ struct DayProgress: Identifiable {
     let completed: Int
     let total: Int
     let isToday: Bool
+    var isFrozen: Bool = false
 
     var progress: Double {
+        if isFrozen { return 1.0 }
         guard total > 0 else { return 0 }
         return min(1.0, Double(completed) / Double(total))
     }
@@ -1144,11 +1183,13 @@ struct DayProgress: Identifiable {
     }
 
     var percentText: String {
+        if isFrozen { return "❄" }
         guard total > 0 else { return "—" }
         return "\(Int(round(progress * 100)))%"
     }
 
     var countText: String {
+        if isFrozen { return "frozen" }
         guard total > 0 else { return "rest" }
         return "\(completed) of \(total)"
     }
@@ -1185,10 +1226,16 @@ struct DayCircle: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.4), value: day.progress)
 
-            Text(day.dayNumber)
-                .font(.system(size: 22, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(day.isToday ? Theme.accentFill : Theme.textPrimary)
+            if day.isFrozen {
+                Image(systemName: "snowflake")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundStyle(Color(hex: "#118AB2"))
+            } else {
+                Text(day.dayNumber)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(day.isToday ? Theme.accentFill : Theme.textPrimary)
+            }
         }
         .frame(width: 68, height: 68)
         .overlay(alignment: .topTrailing) {
@@ -1206,6 +1253,7 @@ struct DayCircle: View {
     }
 
     private var ringColor: Color {
+        if day.isFrozen { return Color(hex: "#118AB2") }
         guard day.total > 0 else { return Theme.textTertiary.opacity(0.35) }
         if day.progress >= 1.0 { return Theme.success }
         if day.progress >= 0.6 { return Theme.warning }
@@ -1222,6 +1270,11 @@ struct DayDetailView: View {
     let records: [CompletionRecord]
 
     @Environment(\.dismiss) private var dismiss
+    @Query private var freezes: [StreakFreeze]
+
+    private var freezeRecord: StreakFreeze? {
+        freezes.first { $0.dayKey == day.id }
+    }
 
     private var dayRecords: [CompletionRecord] {
         records
@@ -1269,6 +1322,9 @@ struct DayDetailView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    if let freeze = freezeRecord {
+                        frozenBanner(freeze)
+                    }
                     summarySection
                     timelineSection
                 }
@@ -1284,7 +1340,7 @@ struct DayDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(day.date.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                     .font(.title2.bold())
-                Text(day.total > 0 ? "\(day.completed) of \(day.total) completed" : "No exercises scheduled")
+                Text(headerSubtitle)
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -1292,6 +1348,56 @@ struct DayDetailView: View {
             Button("Close") { dismiss() }
         }
         .padding(20)
+    }
+
+    private var headerSubtitle: String {
+        if day.isFrozen { return "Protected by freeze token" }
+        return day.total > 0 ? "\(day.completed) of \(day.total) completed" : "No exercises scheduled"
+    }
+
+    private func frozenBanner(_ freeze: StreakFreeze) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(Color(hex: "#118AB2").opacity(0.18))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "snowflake")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(hex: "#118AB2"))
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Frozen day")
+                        .font(.callout.weight(.semibold))
+                    Text("Your streak was protected on this day.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                Spacer()
+            }
+            if !freeze.note.isEmpty {
+                Text("“\(freeze.note)”")
+                    .font(.caption.italic())
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(.top, 2)
+            }
+            Text("Token used \(freeze.usedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(Theme.textTertiary)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(hex: "#118AB2").opacity(0.14),
+                    Color(hex: "#06D6A0").opacity(0.08)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var summarySection: some View {
@@ -1371,7 +1477,9 @@ struct DayDetailView: View {
             Text("Per-exercise breakdown").font(.headline)
 
             if dayRecords.isEmpty {
-                Text("No exercises were completed on this day.")
+                Text(day.isFrozen
+                     ? "No exercises were logged on this day — the freeze protected your streak instead."
+                     : "No exercises were completed on this day.")
                     .font(.callout)
                     .foregroundStyle(Theme.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

@@ -11,10 +11,11 @@ struct TodayView: View {
     @Query private var dayLocks: [DayLock]
     @Query private var swears: [DailySwear]
     @Query private var milestones: [Milestone]
+    @Query private var freezes: [StreakFreeze]
 
-    // User-configurable schedule
     @AppStorage(PreferenceKeys.minimumExercises) private var minimumExercises: Int = Preferences.defaultMinimumExercises
     @AppStorage(PreferenceKeys.restDaysRaw) private var restDaysRaw: String = Preferences.defaultRestDaysRaw
+    @AppStorage(PreferenceKeys.freezeTokensInBank) private var freezeTokensInBank: Int = 0
 
     @State private var selectedExercise: Exercise?
     @State private var exerciseToEdit: Exercise?
@@ -27,10 +28,13 @@ struct TodayView: View {
     @State private var showDayCompletePrompt = false
     @State private var showSwearSheet = false
 
-    // Celebration state
     @State private var celebration: CelebrationKind?
     @State private var celebrationQueue: [CelebrationKind] = []
     @State private var pendingMilestoneCelebration: Int?
+
+    @State private var showFreezeSheet = false
+    @State private var showTokenEarnedOverlay = false
+    @State private var bannerDismissed = false
 
     #if DEBUG
     @State private var showManageExercises = false
@@ -104,9 +108,13 @@ struct TodayView: View {
         let key = DayLogic.dayKey()
         return Set(records.filter { $0.dayKey == key }.map(\.exerciseID))
     }
+    private var frozenKeys: Set<String> {
+        Set(freezes.map(\.dayKey))
+    }
     private var streak: Int {
         DayLogic.currentStreak(
-            completedKeys: DayLogic.completedDayKeys(exercises: dailyExercises, records: records)
+            completedKeys: DayLogic.completedDayKeys(exercises: dailyExercises, records: records),
+            frozenKeys: frozenKeys
         )
     }
     private var progress: (done: Int, total: Int) {
@@ -123,6 +131,36 @@ struct TodayView: View {
         return milestones.first { $0.completedAt == nil && $0.day == target }
     }
 
+    // MARK: Freeze detection
+
+    private var missedDayCandidate: Date? {
+        StreakFreezeManager.findMostRecentMissedDay(
+            records: records,
+            exercises: dailyExercises,
+            frozenKeys: frozenKeys
+        )
+    }
+
+    private var streakIfFreezeCandidate: Int {
+        guard let date = missedDayCandidate else { return 0 }
+        var withFreeze = frozenKeys
+        withFreeze.insert(DayLogic.dayKey(date))
+        return DayLogic.currentStreak(
+            completedKeys: DayLogic.completedDayKeys(exercises: dailyExercises, records: records),
+            frozenKeys: withFreeze
+        )
+    }
+
+    private var canOfferFreeze: Bool {
+        !bannerDismissed
+        && missedDayCandidate != nil
+        && streakIfFreezeCandidate > 0
+        && freezeTokensInBank > 0
+        && !isLockedToday
+    }
+
+    // MARK: Body
+
     var body: some View {
         ZStack {
             sheetsLayer
@@ -134,8 +172,55 @@ struct TodayView: View {
                 .transition(.opacity)
                 .zIndex(1000)
             }
+
+            tokenEarnedOverlay
         }
         .animation(.easeInOut(duration: 0.25), value: celebration)
+    }
+
+    @ViewBuilder
+    private var tokenEarnedOverlay: some View {
+        if showTokenEarnedOverlay {
+            VStack {
+                HStack(spacing: 10) {
+                    Image(systemName: "snowflake")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .rotationEffect(.degrees(showTokenEarnedOverlay ? 360 : 0))
+                        .animation(
+                            .easeInOut(duration: 1.4).repeatForever(autoreverses: false),
+                            value: showTokenEarnedOverlay
+                        )
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Freeze token earned")
+                            .font(.callout.weight(.semibold))
+                        Text("You can now protect a missed day")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(hex: "#118AB2"), Color(hex: "#06D6A0")],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .shadow(color: Color(hex: "#118AB2").opacity(0.45), radius: 14, y: 4)
+                )
+                .padding(.top, 60)
+
+                Spacer()
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .allowsHitTesting(false)
+            .zIndex(999)
+        }
     }
 
     private var sheetsLayer: some View {
@@ -146,10 +231,12 @@ struct TodayView: View {
             .sheet(isPresented: $showHistory, content: historySheet)
             .sheet(isPresented: $showDayCompletePrompt, content: dayCompleteSheet)
             .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
+            .sheet(isPresented: $showFreezeSheet, content: freezeSheet)
             .sheet(isPresented: $showSwearSheet) {
                 SwearView(dayKey: DayLogic.dayKey()) {
                     DispatchQueue.main.async {
                         publishDayState()
+                        refreshFreezeEarnings(announce: true)
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                             enqueueCelebration(.day)
                         }
@@ -284,6 +371,32 @@ struct TodayView: View {
         }
     }
 
+    @ViewBuilder
+    private func freezeSheet() -> some View {
+        if let date = missedDayCandidate {
+            FreezeTokenSheet(
+                targetDate: date,
+                streakBefore: streak,
+                streakAfter: streakIfFreezeCandidate,
+                tokensInBank: freezeTokensInBank,
+                onConfirm: { note in
+                    let result = StreakFreezeManager.useToken(
+                        for: date,
+                        note: note,
+                        context: context
+                    )
+                    showFreezeSheet = false
+                    if result.isSuccess {
+                        bannerDismissed = false
+                        publishDayState()
+                        NSSound(named: "Pop")?.play()
+                    }
+                },
+                onCancel: { showFreezeSheet = false }
+            )
+        }
+    }
+
     private func handleMinuteTick(_ now: Date) {
         today = now
         checkMilestoneUnlock()
@@ -292,6 +405,7 @@ struct TodayView: View {
     private func handleAppear() {
         publishDayState()
         checkMilestoneUnlock()
+        refreshFreezeEarnings(announce: false)
 
         if isRestDay { return }
 
@@ -348,6 +462,8 @@ struct TodayView: View {
 
             Spacer()
 
+            freezeTokenBadge
+
             streakBadge
 
             Button(action: PreferencesOpener.open) {
@@ -362,6 +478,36 @@ struct TodayView: View {
         .padding(20)
     }
 
+    private var freezeTokenBadge: some View {
+        VStack(spacing: 2) {
+            HStack(spacing: 4) {
+                Image(systemName: "snowflake")
+                    .foregroundStyle(freezeTokensInBank > 0 ? Color(hex: "#118AB2") : Theme.textSecondary)
+                Text("\(freezeTokensInBank)")
+                    .font(.title2.bold().monospacedDigit())
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.4, dampingFraction: 0.75), value: freezeTokensInBank)
+            }
+            Text("freeze\(freezeTokensInBank == 1 ? "" : "s")")
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Theme.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(
+                    freezeTokensInBank > 0
+                        ? Color(hex: "#118AB2").opacity(0.35)
+                        : Theme.border,
+                    lineWidth: 0.5
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .help("Freeze tokens protect your streak")
+    }
+
     private var streakBadge: some View {
         VStack(spacing: 2) {
             HStack(spacing: 4) {
@@ -369,6 +515,8 @@ struct TodayView: View {
                     .foregroundStyle(streak > 0 ? Theme.accentFill : Theme.textSecondary)
                 Text("\(streak)")
                     .font(.title2.bold().monospacedDigit())
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.4, dampingFraction: 0.75), value: streak)
             }
             Text("day streak")
                 .font(.caption)
@@ -441,6 +589,17 @@ struct TodayView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
+            Button {
+                let bank = StreakFreezeManager.tokensInBank
+                UserDefaults.standard.set(min(bank + 1, StreakFreezeManager.maxTokens),
+                                          forKey: PreferenceKeys.freezeTokensInBank)
+            } label: {
+                Label("+ Token", systemImage: "snowflake")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
             Spacer()
 
             Text(debugStatusText)
@@ -468,6 +627,7 @@ struct TodayView: View {
         if sworeToday { bits.append("sworn") }
         if isLockedToday { bits.append("locked") }
         if isRestDay { bits.append("rest") }
+        bits.append("❄\(StreakFreezeManager.tokensInBank)")
         return bits.joined(separator: " • ")
     }
 
@@ -495,6 +655,7 @@ struct TodayView: View {
 
         publishDayState()
         checkMilestoneUnlock()
+        refreshFreezeEarnings(announce: true)
     }
 
     private func debugUndoAll() {
@@ -521,6 +682,7 @@ struct TodayView: View {
         celebration = nil
         celebrationQueue.removeAll()
         pendingMilestoneCelebration = nil
+        bannerDismissed = false
 
         publishDayState()
     }
@@ -547,6 +709,9 @@ struct TodayView: View {
                 swearBanner
             } else if allDone && sworeToday {
                 allDoneBanner
+            }
+            if canOfferFreeze {
+                freezeDangerBanner
             }
             exerciseList
         }
@@ -615,6 +780,68 @@ struct TodayView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
         .background(Theme.successSoft)
+    }
+
+    private var freezeDangerBanner: some View {
+        let missedDate = missedDayCandidate
+        let restored = streakIfFreezeCandidate
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "EEEE, MMM d"
+        let missedLabel = missedDate.map { dateFormatter.string(from: $0) } ?? ""
+
+        return HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color(hex: "#118AB2").opacity(0.20))
+                    .frame(width: 38, height: 38)
+                Image(systemName: "snowflake")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(Color(hex: "#118AB2"))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Protect your \(restored)-day streak")
+                    .font(.headline)
+                Text("You missed \(missedLabel). Spend a freeze token?")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+            }
+
+            Spacer()
+
+            Button {
+                showFreezeSheet = true
+            } label: {
+                Label("Use Token", systemImage: "snowflake")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .tint(Color(hex: "#118AB2"))
+
+            Button {
+                bannerDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.textSecondary)
+                    .padding(6)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(hex: "#118AB2").opacity(0.14),
+                    Color(hex: "#06D6A0").opacity(0.10)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     private var restDayState: some View {
@@ -749,6 +976,27 @@ struct TodayView: View {
         .padding(16)
     }
 
+    // MARK: - Freeze helpers
+
+    private func refreshFreezeEarnings(announce: Bool) {
+        let completedDays = DayLogic.completedDayKeys(
+            exercises: dailyExercises,
+            records: records
+        ).count
+
+        let earned = StreakFreezeManager.refreshEarnings(completedDays: completedDays)
+        if earned && announce {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                showTokenEarnedOverlay = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    showTokenEarnedOverlay = false
+                }
+            }
+        }
+    }
+
     // MARK: - Celebration orchestration
 
     private func enqueueCelebration(_ kind: CelebrationKind) {
@@ -763,8 +1011,6 @@ struct TodayView: View {
         let justFinished = celebration
         celebration = nil
 
-        // If the day celebration just ended and a milestone is waiting,
-        // chain straight into it.
         if case .day = justFinished, let target = pendingMilestoneCelebration {
             pendingMilestoneCelebration = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -773,14 +1019,8 @@ struct TodayView: View {
             return
         }
 
-        // If a milestone celebration just ended, only open the reflection
-        // sheet when there's actually a milestone to reflect on. Firing the
-        // celebration directly (e.g. from the DEBUG "Test 30d" button)
-        // doesn't insert one, so this guard prevents an empty sheet.
         if case .milestone = justFinished {
             guard pendingMilestone != nil else {
-                // Nothing to reflect on — drain the queue if anything is
-                // waiting and return.
                 playQueuedCelebration()
                 return
             }
@@ -800,6 +1040,7 @@ struct TodayView: View {
             celebration = next
         }
     }
+
     // MARK: - State
 
     private func publishDayState() {
@@ -826,6 +1067,7 @@ struct TodayView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             publishDayState()
             checkMilestoneUnlock()
+            refreshFreezeEarnings(announce: true)
             if allDone && !isLockedToday && !showMilestoneUnlock && !sworeToday {
                 showDayCompletePrompt = true
             }
@@ -850,7 +1092,10 @@ struct TodayView: View {
 
     private func checkMilestoneUnlock() {
         let completed = DayLogic.completedDayKeys(exercises: dailyExercises, records: records)
-        let streak = DayLogic.currentStreak(completedKeys: completed)
+        let streak = DayLogic.currentStreak(
+            completedKeys: completed,
+            frozenKeys: frozenKeys
+        )
         let unlocked = Set(milestones.map(\.day))
 
         for target in stride(from: 30, through: max(streak, 30), by: 30)
@@ -860,6 +1105,184 @@ struct TodayView: View {
             try? context.save()
             pendingMilestoneCelebration = target
             break
+        }
+    }
+}
+
+// MARK: - Freeze Token Sheet
+
+struct FreezeTokenSheet: View {
+    let targetDate: Date
+    let streakBefore: Int
+    let streakAfter: Int
+    let tokensInBank: Int
+    let onConfirm: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var note: String = ""
+    @State private var appeared = false
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEEE, MMMM d"
+        return f
+    }()
+
+    var body: some View {
+        VStack(spacing: 22) {
+            iconHeader
+            titleBlock
+            impactCard
+            if tokensInBank > 1 {
+                inventoryNote
+            }
+            noteField
+            actionsRow
+        }
+        .padding(28)
+        .frame(width: 480)
+        .background(Theme.surfaceBase)
+        .scaleEffect(appeared ? 1 : 0.94)
+        .opacity(appeared ? 1 : 0)
+        .onAppear {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                appeared = true
+            }
+        }
+    }
+
+    private var iconHeader: some View {
+        ZStack {
+            Circle()
+                .fill(Color(hex: "#118AB2").opacity(0.18))
+                .frame(width: 130, height: 130)
+                .blur(radius: 22)
+
+            Circle()
+                .fill(Theme.surfaceElevated)
+                .frame(width: 96, height: 96)
+                .overlay(Circle().stroke(Theme.border, lineWidth: 0.5))
+
+            Image(systemName: "snowflake")
+                .font(.system(size: 46, weight: .semibold))
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [Color(hex: "#118AB2"), Color(hex: "#06D6A0")],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .rotationEffect(.degrees(appeared ? 0 : -90))
+                .animation(.spring(response: 0.7, dampingFraction: 0.6), value: appeared)
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(spacing: 6) {
+            Text("Protect your streak")
+                .font(.title2.bold())
+            Text("Spend a freeze token to make **\(Self.dateFormatter.string(from: targetDate))** not count against you.")
+                .font(.callout)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var impactCard: some View {
+        HStack(spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("BEFORE")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 4) {
+                    Image(systemName: "flame.fill")
+                        .foregroundStyle(Theme.textSecondary)
+                        .font(.caption)
+                    Text("\(streakBefore)")
+                        .font(.title2.bold().monospacedDigit())
+                        .foregroundStyle(Theme.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Image(systemName: "arrow.right")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Theme.textTertiary)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("AFTER")
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(Theme.textTertiary)
+                HStack(spacing: 4) {
+                    Image(systemName: "flame.fill")
+                        .foregroundStyle(Theme.accentFill)
+                        .font(.caption)
+                    Text("\(streakAfter)")
+                        .font(.title2.bold().monospacedDigit())
+                        .foregroundStyle(Theme.accent)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Theme.surfaceElevated)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color(hex: "#118AB2").opacity(0.30), lineWidth: 0.5)
+        )
+    }
+
+    private var inventoryNote: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "snowflake")
+                .font(.caption)
+                .foregroundStyle(Color(hex: "#118AB2"))
+            Text("You have \(tokensInBank) tokens. One will remain after this.")
+                .font(.caption)
+                .foregroundStyle(Theme.textSecondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color(hex: "#118AB2").opacity(0.10))
+        )
+    }
+
+    private var noteField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Note (optional)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.4)
+            TextField("Why did you miss this day?", text: $note)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private var actionsRow: some View {
+        HStack(spacing: 10) {
+            Button("Cancel") { onCancel() }
+                .keyboardShortcut(.cancelAction)
+
+            Spacer()
+
+            Button {
+                onConfirm(note)
+            } label: {
+                Label("Use Token", systemImage: "snowflake")
+                    .font(.body.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+            .disabled(tokensInBank <= 0)
         }
     }
 }

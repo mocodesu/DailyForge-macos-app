@@ -18,7 +18,6 @@ enum DayLogic {
     // MARK: - User-configurable schedule
 
     /// Number of exercises the user must set up before the day "counts".
-    /// Reads from preferences; defaults to 5 if unset or out of range.
     static func minimumExercises() -> Int {
         let raw = UserDefaults.standard.integer(forKey: PreferenceKeys.minimumExercises)
         guard raw > 0 else { return Preferences.defaultMinimumExercises }
@@ -54,8 +53,6 @@ enum DayLogic {
     // MARK: - Exercise filtering
 
     /// Exercises that should be shown on the given day.
-    /// Daily exercises always appear. Non-daily exercises appear only on
-    /// the calendar day they were created. Rest days show nothing.
     static func activeExercises(from all: [Exercise], on date: Date = Date()) -> [Exercise] {
         if isRestDay(date) { return [] }
         return all.filter { exercise in
@@ -73,7 +70,6 @@ enum DayLogic {
     // MARK: - Today's progress
 
     /// Every exercise shown today has a completion record for today.
-    /// Rest days vacuously count as "done" since nothing is required.
     static func allCompletedToday(exercises: [Exercise], records: [CompletionRecord]) -> Bool {
         if isRestDay() { return true }
         guard !exercises.isEmpty else { return false }
@@ -110,14 +106,17 @@ enum DayLogic {
         return complete
     }
 
-    /// Consecutive non-rest days ending today (or yesterday if today
-    /// isn't complete yet). Rest days are skipped entirely — they neither
-    /// add to nor break the streak.
-    static func currentStreak(completedKeys: Set<String>) -> Int {
+    /// Consecutive non-rest, non-frozen days ending today (or yesterday if
+    /// today isn't complete yet). Rest days and frozen days are skipped —
+    /// they neither add to nor break the streak.
+    static func currentStreak(
+        completedKeys: Set<String>,
+        frozenKeys: Set<String> = []
+    ) -> Int {
         var streak = 0
         var cursor = Calendar.current.startOfDay(for: Date())
 
-        if isRestDay(cursor) {
+        if isRestDay(cursor) || frozenKeys.contains(dayKey(cursor)) {
             guard let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: cursor) else {
                 return 0
             }
@@ -130,7 +129,7 @@ enum DayLogic {
         }
 
         while true {
-            if isRestDay(cursor) {
+            if isRestDay(cursor) || frozenKeys.contains(dayKey(cursor)) {
                 guard let prev = Calendar.current.date(byAdding: .day, value: -1, to: cursor) else {
                     break
                 }

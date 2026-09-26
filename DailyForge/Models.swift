@@ -168,3 +168,21 @@ final class Milestone {
         self.userNotes = ""
     }
 }
+
+@Model
+final class StreakFreeze {
+    var id: UUID
+    /// Calendar day key (`yyyy-MM-dd`) of the day that was frozen.
+    var dayKey: String
+    /// When the freeze token was spent.
+    var usedAt: Date
+    /// Optional user note explaining why they froze that day.
+    var note: String
+
+    init(dayKey: String, note: String = "") {
+        self.id = UUID()
+        self.dayKey = dayKey
+        self.usedAt = Date()
+        self.note = note
+    }
+}

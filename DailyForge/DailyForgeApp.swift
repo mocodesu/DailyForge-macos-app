@@ -20,7 +20,8 @@ struct DailyForgeApp: App {
             DayLock.self,
             DailySwear.self,
             UserProfile.self,
-            Milestone.self
+            Milestone.self,
+            StreakFreeze.self
         ])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
