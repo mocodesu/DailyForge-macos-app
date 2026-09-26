@@ -83,6 +83,12 @@ class EnforcementController: ObservableObject {
     // MARK: - Launch evaluation (today only)
 
     func handleLaunch(container: ModelContainer) {
+        // Rest days: nothing is due, no enforcement, no overlay.
+        if DayLogic.isRestDay() {
+            print("🌴 Launch: rest day — enforcement skipped.")
+            return
+        }
+
         guard UserDefaults.standard.bool(forKey: PreferenceKeys.reminderEnabled),
               UserDefaults.standard.bool(forKey: PreferenceKeys.enforceKiosk) else { return }
 
@@ -131,6 +137,16 @@ class EnforcementController: ObservableObject {
     // MARK: - Timer tick
 
     private func tick() {
+        // Rest days: stop any lingering overlay from the previous day and
+        // do nothing else. No reminder, no kiosk.
+        if DayLogic.isRestDay() {
+            if OverlayEnforcer.shared.isActive {
+                print("🌴 Rest day: stopping active overlay.")
+                OverlayEnforcer.shared.stop()
+            }
+            return
+        }
+
         guard UserDefaults.standard.bool(forKey: PreferenceKeys.reminderEnabled) else { return }
         guard let reminderDate = todayReminderDate() else { return }
         guard Date() >= reminderDate else { return }
@@ -219,6 +235,7 @@ class EnforcementController: ObservableObject {
     }
 
     private func engageIfNeeded() {
+        guard !DayLogic.isRestDay() else { return }
         guard UserDefaults.standard.bool(forKey: PreferenceKeys.enforceKiosk) else { return }
         guard !DayState.shared.allDone else { return }
         guard DayState.shared.exerciseCount > 0 else { return }

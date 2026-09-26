@@ -78,7 +78,7 @@ struct ExerciseCard: View {
         case .reps:
             return "\(exercise.sets) × \(exercise.reps) reps"
         case .timer:
-            return "\(exercise.sets) × \(formatDuration(exercise.durationSeconds))"
+            return "\(formatDuration(exercise.sessionDurationSeconds)) hold"
         }
     }
 }
@@ -111,6 +111,7 @@ struct ExerciseDetailSheet: View {
     let isCompletedToday: Bool
     var onStart: () -> Void
     var onComplete: () -> Void
+    var onEdit: () -> Void
     var onDisableDaily: () -> Void
     var onDelete: () -> Void
 
@@ -157,9 +158,9 @@ struct ExerciseDetailSheet: View {
 
     private var sheetHeight: CGFloat {
         #if DEBUG
-        return isCompletedToday ? 600 : 660
+        return isCompletedToday ? 640 : 700
         #else
-        return isCompletedToday ? 500 : 560
+        return isCompletedToday ? 540 : 600
         #endif
     }
 
@@ -214,38 +215,39 @@ struct ExerciseDetailSheet: View {
 
     private var statsRow: some View {
         HStack(spacing: 30) {
-            statTile(value: "\(exercise.sets)", label: "Sets")
-
             switch exercise.exerciseType {
             case .reps:
+                statTile(value: "\(exercise.sets)", label: "Sets")
                 statTile(value: "\(exercise.reps)", label: "Reps per set")
                 statTile(value: "\(exercise.sets * exercise.reps)", label: "Total reps")
             case .timer:
-                statTile(value: formatDuration(exercise.durationSeconds), label: "Per set")
-                statTile(value: formatDuration(exercise.durationSeconds * exercise.sets), label: "Work time")
+                statTile(value: formatDuration(exercise.sessionDurationSeconds), label: "Hold time")
             }
         }
     }
 
+    @ViewBuilder
     private var sessionPanel: some View {
-        GroupBox {
-            HStack(spacing: 12) {
-                Image(systemName: "timer")
-                    .font(.title2)
-                    .foregroundStyle(Theme.accentFill)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Session timer")
+        if exercise.exerciseType == .reps {
+            GroupBox {
+                HStack(spacing: 12) {
+                    Image(systemName: "timer")
+                        .font(.title2)
+                        .foregroundStyle(Theme.accentFill)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Session timer")
+                            .font(.caption)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(formatDuration(exercise.sessionDurationSeconds))
+                            .font(.title3.bold().monospacedDigit())
+                    }
+                    Spacer()
+                    Text("Cannot be stopped once started")
                         .font(.caption)
-                        .foregroundStyle(Theme.textSecondary)
-                    Text(formatDuration(exercise.sessionDurationSeconds))
-                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(Theme.textTertiary)
                 }
-                Spacer()
-                Text("Cannot be stopped once started")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textTertiary)
+                .padding(8)
             }
-            .padding(8)
         }
     }
 
@@ -297,8 +299,6 @@ struct ExerciseDetailSheet: View {
                     Label("Completed today", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(Theme.success)
                     Spacer()
-                    Button("Close") { dismiss() }
-                        .keyboardShortcut(.defaultAction)
                 }
             } else {
                 Button {
@@ -310,9 +310,29 @@ struct ExerciseDetailSheet: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .keyboardShortcut(.defaultAction)
+            }
 
-                Button("Not yet") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+            HStack(spacing: 10) {
+                Button {
+                    onEdit()
+                } label: {
+                    Label("Edit Exercise", systemImage: "pencil")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+
+                if isCompletedToday {
+                    Button("Close") { dismiss() }
+                        .controlSize(.large)
+                        .keyboardShortcut(.defaultAction)
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Button("Not yet") { dismiss() }
+                        .controlSize(.large)
+                        .keyboardShortcut(.cancelAction)
+                        .frame(maxWidth: .infinity)
+                }
             }
 
             #if DEBUG
@@ -387,6 +407,7 @@ struct ManageExercisesView: View {
     @Query(sort: \Exercise.sortIndex) private var exercises: [Exercise]
 
     @State private var pendingDeletion: Exercise?
+    @State private var pendingEdit: Exercise?
     @State private var showCreateExercise = false
 
     var body: some View {
@@ -399,6 +420,9 @@ struct ManageExercisesView: View {
         .background(Theme.surfaceBase)
         .sheet(isPresented: $showCreateExercise) {
             CreateExerciseView(nextSortIndex: nextSortIndex)
+        }
+        .sheet(item: $pendingEdit) { exercise in
+            CreateExerciseView(nextSortIndex: nextSortIndex, exerciseToEdit: exercise)
         }
         .confirmationDialog(
             "Delete this exercise?",
@@ -427,7 +451,7 @@ struct ManageExercisesView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Manage Exercises").font(.title2.bold())
-                Text("\(exercises.count) exercise\(exercises.count == 1 ? "" : "s") • Delete or add more.")
+                Text("\(exercises.count) exercise\(exercises.count == 1 ? "" : "s") • Edit, delete, or add more.")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
             }
@@ -464,9 +488,11 @@ struct ManageExercisesView: View {
         } else {
             List {
                 ForEach(exercises) { exercise in
-                    ManageRow(exercise: exercise) {
-                        pendingDeletion = exercise
-                    }
+                    ManageRow(
+                        exercise: exercise,
+                        onEdit: { pendingEdit = exercise },
+                        onDelete: { pendingDeletion = exercise }
+                    )
                 }
             }
             .listStyle(.inset)
@@ -488,6 +514,7 @@ struct ManageExercisesView: View {
 
 private struct ManageRow: View {
     let exercise: Exercise
+    let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -516,6 +543,12 @@ private struct ManageRow: View {
 
             Spacer()
 
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+            }
+            .buttonStyle(.borderless)
+            .help("Edit \(exercise.name)")
+
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
             }
@@ -530,7 +563,7 @@ private struct ManageRow: View {
         case .reps:
             return "\(exercise.sets) sets × \(exercise.reps) reps • \(exercise.bodyParts.joined(separator: ", "))"
         case .timer:
-            return "\(exercise.sets) sets × \(formatDuration(exercise.durationSeconds)) • \(exercise.bodyParts.joined(separator: ", "))"
+            return "\(formatDuration(exercise.sessionDurationSeconds)) hold • \(exercise.bodyParts.joined(separator: ", "))"
         }
     }
 }
@@ -670,7 +703,7 @@ struct WorkoutSessionView: View {
                 .font(.title3)
                 .foregroundStyle(Theme.textSecondary)
         case .timer:
-            Text("\(exercise.sets) sets × \(formatDuration(exercise.durationSeconds)) hold")
+            Text("\(formatDuration(exercise.sessionDurationSeconds)) hold")
                 .font(.title3)
                 .foregroundStyle(Theme.textSecondary)
         }
@@ -700,28 +733,33 @@ struct WorkoutSessionView: View {
     }
 }
 
-// MARK: - Create Sheet
+// MARK: - Create / Edit Sheet
 
 struct CreateExerciseView: View {
     let nextSortIndex: Int
+    var exerciseToEdit: Exercise? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
+
+    /// Live list of existing exercises in the store. Used for the duplicate
+    /// warning in the catalog preview and to block name collisions on save.
+    @Query private var existingExercises: [Exercise]
 
     @State private var offset = 0
     @State private var justSavedCount = 0
     @State private var selectedCatalogName: String = ""
 
-    @State private var name = ""
-    @State private var selectedBodyParts: Set<String> = []
-    @State private var exerciseType: ExerciseType = .reps
-    @State private var isDaily = true
-    @State private var repsText = "10"
-    @State private var setsText = "3"
-    @State private var durationText = "30"
-    @State private var sessionDurationText = "60"
-    @State private var notes = ""
-    @State private var confirmLock = false
+    @State private var name: String
+    @State private var selectedBodyParts: Set<String>
+    @State private var exerciseType: ExerciseType
+    @State private var isDaily: Bool
+    @State private var repsText: String
+    @State private var setsText: String
+    @State private var durationText: String
+    @State private var sessionDurationText: String
+    @State private var notes: String
+    @State private var confirmLock: Bool
     @State private var errorMessage: String?
 
     private let allBodyParts = [
@@ -729,22 +767,54 @@ struct CreateExerciseView: View {
         "Legs", "Glutes", "Full Body", "Cardio"
     ]
 
-    private let quickPerSetDurations = [15, 30, 45, 60, 90, 120]
     private let quickSessionDurations: [(String, Int)] = [
         ("30s", 30), ("1m", 60), ("2m", 120), ("3m", 180), ("5m", 300), ("10m", 600)
     ]
+
+    private var isEditing: Bool { exerciseToEdit != nil }
+
+    init(nextSortIndex: Int, exerciseToEdit: Exercise? = nil) {
+        self.nextSortIndex = nextSortIndex
+        self.exerciseToEdit = exerciseToEdit
+
+        if let e = exerciseToEdit {
+            _name = State(initialValue: e.name)
+            _selectedBodyParts = State(initialValue: Set(e.bodyParts))
+            _exerciseType = State(initialValue: e.exerciseType)
+            _isDaily = State(initialValue: e.isDaily)
+            _repsText = State(initialValue: "\(max(e.reps, 1))")
+            _setsText = State(initialValue: "\(max(e.sets, 1))")
+            _durationText = State(initialValue: "\(max(e.durationSeconds, 30))")
+            _sessionDurationText = State(initialValue: "\(max(e.sessionDurationSeconds, 60))")
+            _notes = State(initialValue: e.notes)
+            _confirmLock = State(initialValue: true)
+        } else {
+            _name = State(initialValue: "")
+            _selectedBodyParts = State(initialValue: [])
+            _exerciseType = State(initialValue: .reps)
+            _isDaily = State(initialValue: true)
+            _repsText = State(initialValue: "10")
+            _setsText = State(initialValue: "3")
+            _durationText = State(initialValue: "30")
+            _sessionDurationText = State(initialValue: "60")
+            _notes = State(initialValue: "")
+            _confirmLock = State(initialValue: false)
+        }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 if justSavedCount > 0 { savedBanner }
-                quickStartBox
+                if !isEditing { quickStartBox }
                 formBox
 
-                Toggle(isOn: $confirmLock) {
-                    Text("I understand this exercise is permanent and cannot be changed.")
-                        .font(.callout)
+                if !isEditing {
+                    Toggle(isOn: $confirmLock) {
+                        Text("I understand this exercise will be added to my daily routine.")
+                            .font(.callout)
+                    }
                 }
 
                 if let errorMessage {
@@ -761,8 +831,11 @@ struct CreateExerciseView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("New Exercise").font(.largeTitle.bold())
-            Text("Once saved, this exercise is locked in. You can still change the daily-repeat flag later.")
+            Text(isEditing ? "Edit Exercise" : "New Exercise")
+                .font(.largeTitle.bold())
+            Text(isEditing
+                 ? "Changes apply to future workouts. Your completion history is preserved."
+                 : "Once saved, this exercise is added to your routine. You can edit it any time.")
                 .font(.callout)
                 .foregroundStyle(Theme.textSecondary)
         }
@@ -826,7 +899,12 @@ struct CreateExerciseView: View {
     }
 
     private func catalogPreview(_ item: CatalogExercise) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let alreadyExists = existingExercises.contains { existing in
+            existing.name.localizedCaseInsensitiveCompare(item.name) == .orderedSame
+                && existing.id != (exerciseToEdit?.id ?? UUID())
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 ForEach(item.bodyParts, id: \.self) { part in
                     BodyPartPill(part: part, compact: true)
@@ -840,6 +918,16 @@ struct CreateExerciseView: View {
                 .italic()
                 .foregroundStyle(Theme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if alreadyExists {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                    Text("You already have an exercise named \"\(item.name)\".")
+                }
+                .font(.caption)
+                .foregroundStyle(Theme.warning)
+                .padding(.top, 4)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 4)
@@ -850,7 +938,7 @@ struct CreateExerciseView: View {
         case .reps:
             return "\(item.sets) sets × \(item.reps) reps • session \(formatDuration(item.sessionSeconds))"
         case .timer:
-            return "\(item.sets) sets × \(formatDuration(item.perSetSeconds)) • session \(formatDuration(item.sessionSeconds))"
+            return "\(formatDuration(item.sessionSeconds)) hold"
         }
     }
 
@@ -910,17 +998,16 @@ struct CreateExerciseView: View {
                     }
                 }
 
-                HStack {
-                    Text("Sets")
-                    Spacer()
-                    TextField("", text: $setsText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
-                        .multilineTextAlignment(.trailing)
-                }
-
                 switch exerciseType {
                 case .reps:
+                    HStack {
+                        Text("Sets")
+                        Spacer()
+                        TextField("", text: $setsText)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 80)
+                            .multilineTextAlignment(.trailing)
+                    }
                     HStack {
                         Text("Reps per set")
                         Spacer()
@@ -930,25 +1017,7 @@ struct CreateExerciseView: View {
                             .multilineTextAlignment(.trailing)
                     }
                 case .timer:
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Seconds per set")
-                            Spacer()
-                            TextField("", text: $durationText)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 80)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        HStack(spacing: 6) {
-                            ForEach(quickPerSetDurations, id: \.self) { seconds in
-                                Button(formatDuration(seconds)) {
-                                    durationText = "\(seconds)"
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                        }
-                    }
+                    EmptyView()
                 }
 
                 Divider()
@@ -956,8 +1025,11 @@ struct CreateExerciseView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Session timer").font(.callout.weight(.medium))
-                            Text("Total workout window. Once started, it cannot be stopped.")
+                            Text(exerciseType == .timer ? "Hold time" : "Session timer")
+                                .font(.callout.weight(.medium))
+                            Text(exerciseType == .timer
+                                 ? "How long you'll hold the position. Once started, it cannot be stopped."
+                                 : "Total workout window. Once started, it cannot be stopped.")
                                 .font(.caption)
                                 .foregroundStyle(Theme.textSecondary)
                         }
@@ -969,9 +1041,12 @@ struct CreateExerciseView: View {
                     }
                     HStack(spacing: 6) {
                         ForEach(quickSessionDurations, id: \.1) { label, seconds in
-                            Button(label) { sessionDurationText = "\(seconds)" }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                            QuickValueChip(
+                                label: label,
+                                isSelected: Int(sessionDurationText) == seconds
+                            ) {
+                                sessionDurationText = "\(seconds)"
+                            }
                         }
                     }
                 }
@@ -991,13 +1066,15 @@ struct CreateExerciseView: View {
 
             Spacer()
 
-            Button("Save & Add Another") { save(stayOpen: true) }
-                .buttonStyle(.bordered)
-                .disabled(!confirmLock)
+            if !isEditing {
+                Button("Save & Add Another") { save(stayOpen: true) }
+                    .buttonStyle(.bordered)
+                    .disabled(!confirmLock)
+            }
 
-            Button("Save Exercise") { save(stayOpen: false) }
+            Button(isEditing ? "Save Changes" : "Save Exercise") { save(stayOpen: false) }
                 .buttonStyle(.borderedProminent)
-                .disabled(!confirmLock)
+                .disabled(!isEditing && !confirmLock)
                 .keyboardShortcut(.defaultAction)
         }
     }
@@ -1017,8 +1094,8 @@ struct CreateExerciseView: View {
             repsText = "\(item.reps)"
             durationText = "30"
         case .timer:
-            durationText = "\(item.perSetSeconds)"
             repsText = "10"
+            durationText = "\(item.sessionSeconds)"
         }
 
         errorMessage = nil
@@ -1037,50 +1114,90 @@ struct CreateExerciseView: View {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { errorMessage = "Please enter a name."; return }
         guard !selectedBodyParts.isEmpty else { errorMessage = "Pick at least one body part."; return }
-        guard let sets = Int(setsText), sets > 0 else { errorMessage = "Sets must be a positive number."; return }
         guard let sessionDuration = Int(sessionDurationText), sessionDuration > 0 else {
-            errorMessage = "Session duration must be a positive number of seconds."
+            errorMessage = "Duration must be a positive number of seconds."
             return
         }
 
         var reps = 0
+        var sets = 1
         var perSetDuration = 0
 
         switch exerciseType {
         case .reps:
+            guard let s = Int(setsText), s > 0 else {
+                errorMessage = "Sets must be a positive number."
+                return
+            }
             guard let r = Int(repsText), r > 0 else {
                 errorMessage = "Reps must be a positive number."
                 return
             }
+            sets = s
             reps = r
+            perSetDuration = 0
         case .timer:
-            guard let d = Int(durationText), d > 0 else {
-                errorMessage = "Per-set duration must be a positive number."
-                return
-            }
-            perSetDuration = d
+            // Timed exercises only carry a single hold duration — no sets,
+            // no reps. We keep sets at 1 and mirror the hold into
+            // durationSeconds so any legacy reader still sees a sane value.
+            sets = 1
+            reps = 0
+            perSetDuration = sessionDuration
+        }
+
+        // Duplicate-name check (case-insensitive). Skips the exercise we're
+        // editing so an in-place save isn't flagged as a collision.
+        let editingID = exerciseToEdit?.id
+        let collision = existingExercises.first { existing in
+            guard existing.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame else { return false }
+            if let editingID = editingID, existing.id == editingID { return false }
+            return true
+        }
+        if collision != nil {
+            errorMessage = "An exercise named \"\(trimmed)\" already exists. Edit that one instead."
+            return
         }
 
         let orderedParts = allBodyParts.filter { selectedBodyParts.contains($0) }
 
-        let exercise = Exercise(
-            name: trimmed,
-            bodyParts: orderedParts,
-            exerciseType: exerciseType,
-            reps: reps,
-            sets: sets,
-            durationSeconds: perSetDuration,
-            sessionDurationSeconds: sessionDuration,
-            isDaily: isDaily,
-            notes: notes,
-            sortIndex: nextSortIndex + offset
-        )
-        context.insert(exercise)
-        try? context.save()
+        if let existing = exerciseToEdit {
+            // Update in place — preserves id, createdAt, sortIndex, and
+            // every CompletionRecord that references this exercise.
+            existing.name = trimmed
+            existing.bodyParts = orderedParts
+            existing.exerciseType = exerciseType
+            existing.reps = reps
+            existing.sets = sets
+            existing.durationSeconds = perSetDuration
+            existing.sessionDurationSeconds = sessionDuration
+            existing.isDaily = isDaily
+            existing.notes = notes
+        } else {
+            let exercise = Exercise(
+                name: trimmed,
+                bodyParts: orderedParts,
+                exerciseType: exerciseType,
+                reps: reps,
+                sets: sets,
+                durationSeconds: perSetDuration,
+                sessionDurationSeconds: sessionDuration,
+                isDaily: isDaily,
+                notes: notes,
+                sortIndex: nextSortIndex + offset
+            )
+            context.insert(exercise)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            errorMessage = "Could not save: \(error.localizedDescription)"
+            return
+        }
 
         errorMessage = nil
 
-        if stayOpen {
+        if stayOpen && !isEditing {
             offset += 1
             justSavedCount += 1
             resetForNext()
@@ -1096,12 +1213,14 @@ struct CreateExerciseView: View {
         setsText = "3"
         durationText = "30"
         sessionDurationText = "60"
+        exerciseType = .reps
         confirmLock = false
         selectedCatalogName = ""
+        selectedBodyParts.removeAll()
     }
 }
 
-// MARK: - Reusable Chip
+// MARK: - Reusable Chips
 
 struct BodyPartChip: View {
     let label: String
@@ -1124,6 +1243,31 @@ struct BodyPartChip: View {
                 Capsule()
                     .strokeBorder(isSelected ? Color.clear : Theme.border, lineWidth: 0.5)
             )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Small numeric chip used for the session-duration quick picks. Fills with
+/// the accent color when its value matches the current field.
+struct QuickValueChip: View {
+    let label: String
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(label)
+                .font(.caption.weight(.medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Theme.accentFill : Theme.surfaceSunken)
+                .foregroundStyle(isSelected ? .white : Theme.textPrimary)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(isSelected ? Color.clear : Theme.border, lineWidth: 0.5)
+                )
         }
         .buttonStyle(.plain)
     }

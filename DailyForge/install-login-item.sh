@@ -19,6 +19,17 @@ log "DailyForge launcher started"
 
 
 # ============================================================
+# 0. Rest days (Thursday = 4, Friday = 5 in `date +%u`)
+# ============================================================
+
+DOW=$(/bin/date +%u)
+if [ "$DOW" = "4" ] || [ "$DOW" = "5" ]; then
+    log "Rest day (Thu/Fri). Nothing to enforce."
+    exit 0
+fi
+
+
+# ============================================================
 # 1. Is DailyForge already running?
 # ============================================================
 

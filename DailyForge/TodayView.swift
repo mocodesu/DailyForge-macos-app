@@ -13,6 +13,7 @@ struct TodayView: View {
     @Query private var milestones: [Milestone]
 
     @State private var selectedExercise: Exercise?
+    @State private var exerciseToEdit: Exercise?
     @State private var activeSession: Exercise?
     @State private var showCreateExercise = false
     @State private var showHistory = false
@@ -24,11 +25,13 @@ struct TodayView: View {
 
     #if DEBUG
     @State private var showManageExercises = false
+    @State private var showDebugUndoConfirmation = false
     #endif
 
     private let minimumExercises = 5
     private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
+    private var isRestDay: Bool { DayLogic.isRestDay(today) }
     private var exercises: [Exercise] {
         DayLogic.activeExercises(from: allExercises, on: today)
     }
@@ -80,6 +83,7 @@ struct TodayView: View {
         alertsLayer
             .sheet(item: $selectedExercise, content: exerciseDetailSheet)
             .sheet(isPresented: $showCreateExercise, content: createExerciseSheet)
+            .sheet(item: $exerciseToEdit, onDismiss: { publishDayState() }, content: editExerciseSheet)
             .sheet(isPresented: $showHistory, content: historySheet)
             .sheet(isPresented: $showDayCompletePrompt, content: dayCompleteSheet)
             .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
@@ -103,6 +107,18 @@ struct TodayView: View {
             } message: {
                 Text("You have \(exercises.count) of \(minimumExercises) required daily exercises. Add \(remainingToMinimum) more to start the day.")
             }
+            #if DEBUG
+            .confirmationDialog(
+                "Undo everything for today?",
+                isPresented: $showDebugUndoConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Undo All", role: .destructive) { debugUndoAll() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This removes every completion record, the day lock, and the voice swear for \(DayLogic.dayKey()). Exercises themselves are untouched.")
+            }
+            #endif
     }
 
     private var lifecycleLayer: some View {
@@ -146,6 +162,12 @@ struct TodayView: View {
                 selectedExercise = nil
                 completeExercise(exercise, startedAt: nil)
             },
+            onEdit: {
+                selectedExercise = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    exerciseToEdit = exercise
+                }
+            },
             onDisableDaily: {
                 selectedExercise = nil
                 publishDayState()
@@ -160,6 +182,14 @@ struct TodayView: View {
     @ViewBuilder
     private func createExerciseSheet() -> some View {
         CreateExerciseView(nextSortIndex: (allExercises.map(\.sortIndex).max() ?? -1) + 1)
+    }
+
+    @ViewBuilder
+    private func editExerciseSheet(_ exercise: Exercise) -> some View {
+        CreateExerciseView(
+            nextSortIndex: (allExercises.map(\.sortIndex).max() ?? -1) + 1,
+            exerciseToEdit: exercise
+        )
     }
 
     @ViewBuilder
@@ -197,6 +227,8 @@ struct TodayView: View {
         publishDayState()
         checkMilestoneUnlock()
 
+        if isRestDay { return }
+
         if !isLockedToday && !meetsMinimum && !allExercises.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
                 if !isLockedToday && !meetsMinimum { showMinimumAlert = true }
@@ -213,6 +245,7 @@ struct TodayView: View {
 
     private func handleAllDoneChange(_ oldValue: Bool, _ newValue: Bool) {
         publishDayState()
+        if isRestDay { return }
         if newValue && !isLockedToday && !showMilestoneUnlock && activeSession == nil && !sworeToday {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                 if !showMilestoneUnlock && !isLockedToday { showDayCompletePrompt = true }
@@ -227,6 +260,9 @@ struct TodayView: View {
     private var mainContent: some View {
         VStack(spacing: 0) {
             header
+            #if DEBUG
+            debugBar
+            #endif
             Divider()
             content
             Divider()
@@ -282,9 +318,138 @@ struct TodayView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
+    #if DEBUG
+    // MARK: - Debug Bar
+
+    private var debugBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "ladybug.fill")
+                .font(.caption)
+                .foregroundStyle(Theme.warning)
+            Text("DEBUG")
+                .font(.caption2.weight(.bold))
+                .tracking(0.5)
+                .foregroundStyle(Theme.warning)
+
+            Divider().frame(height: 16)
+
+            Button {
+                debugCompleteAll()
+            } label: {
+                Label("Complete All", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(exercises.isEmpty || (completedToday.count == exercises.count && sworeToday && isLockedToday))
+
+            Button(role: .destructive) {
+                showDebugUndoConfirmation = true
+            } label: {
+                Label("Undo All", systemImage: "arrow.uturn.backward.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(
+                completedToday.isEmpty
+                && !sworeToday
+                && !isLockedToday
+            )
+
+            Spacer()
+
+            Text(debugStatusText)
+                .font(.caption2.monospaced())
+                .foregroundStyle(Theme.textTertiary)
+
+            Button {
+                showManageExercises = true
+            } label: {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            .help("Manage exercises")
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .background(Theme.warningSoft)
+    }
+
+    private var debugStatusText: String {
+        let records = completedToday.count
+        let total = exercises.count
+        var bits: [String] = ["\(records)/\(total) done"]
+        if sworeToday { bits.append("sworn") }
+        if isLockedToday { bits.append("locked") }
+        if isRestDay { bits.append("rest") }
+        return bits.joined(separator: " • ")
+    }
+
+    private func debugCompleteAll() {
+        let key = DayLogic.dayKey()
+        let existingIDs = Set(records.filter { $0.dayKey == key }.map(\.exerciseID))
+        let now = Date()
+
+        for exercise in exercises where !existingIDs.contains(exercise.id) {
+            let start = now.addingTimeInterval(-Double(exercise.sessionDurationSeconds))
+            let record = CompletionRecord(
+                exerciseID: exercise.id,
+                dayKey: key,
+                startedAt: start,
+                completedAt: now
+            )
+            context.insert(record)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ debugCompleteAll save failed: \(error)")
+        }
+
+        publishDayState()
+        checkMilestoneUnlock()
+    }
+
+    private func debugUndoAll() {
+        let key = DayLogic.dayKey()
+
+        // Delete today's completion records.
+        for record in records where record.dayKey == key {
+            context.delete(record)
+        }
+
+        // Delete today's voice swear, if any.
+        for swear in swears where swear.dayKey == key {
+            context.delete(swear)
+        }
+
+        // Delete today's day lock, if any.
+        for lock in dayLocks where lock.dayKey == key {
+            context.delete(lock)
+        }
+
+        do {
+            try context.save()
+        } catch {
+            print("⚠️ debugUndoAll save failed: \(error)")
+        }
+
+        // Close any sheet that might now be showing stale state.
+        showDayCompletePrompt = false
+        showSwearSheet = false
+
+        publishDayState()
+    }
+    #endif
+
     @ViewBuilder
     private var content: some View {
-        if exercises.isEmpty {
+        if isRestDay {
+            restDayState
+        } else if exercises.isEmpty {
             emptyState
         } else if isLockedToday {
             lockedState
@@ -371,6 +536,38 @@ struct TodayView: View {
         .background(Theme.successSoft)
     }
 
+    private var restDayState: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "moon.zzz.fill")
+                .font(.system(size: 72))
+                .foregroundStyle(Theme.accentFill)
+
+            Text("Rest day").font(.largeTitle.bold())
+
+            Text("Thursdays and Fridays are rest days. Recover, recharge — your streak is safe.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: 420)
+
+            if streak > 0 {
+                Text("\(streak) day streak")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(Theme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Theme.accentSoft)
+                    .clipShape(Capsule())
+            }
+
+            Text("Next workout day: Saturday")
+                .font(.caption)
+                .foregroundStyle(Theme.textTertiary)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "figure.strengthtraining.traditional")
@@ -448,15 +645,19 @@ struct TodayView: View {
 
             Spacer()
 
-            if !isLockedToday {
+            if isRestDay {
+                Label("Rest day", systemImage: "moon.zzz.fill")
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.callout)
+            } else if isLockedToday {
+                Label("Locked until tomorrow", systemImage: "lock.fill")
+                    .foregroundStyle(Theme.textSecondary)
+                    .font(.callout)
+            } else {
                 Button { showCreateExercise = true } label: {
                     Label("Add Exercise", systemImage: "plus")
                 }
                 .buttonStyle(.bordered)
-            } else {
-                Label("Locked until tomorrow", systemImage: "lock.fill")
-                    .foregroundStyle(Theme.textSecondary)
-                    .font(.callout)
             }
         }
         .padding(16)
