@@ -23,6 +23,11 @@ struct TodayView: View {
     @State private var showDayCompletePrompt = false
     @State private var showSwearSheet = false
 
+    // Celebration state
+    @State private var celebration: CelebrationKind?
+    @State private var celebrationQueue: [CelebrationKind] = []
+    @State private var pendingMilestoneCelebration: Int?
+
     #if DEBUG
     @State private var showManageExercises = false
     @State private var showDebugUndoConfirmation = false
@@ -76,7 +81,18 @@ struct TodayView: View {
     }
 
     var body: some View {
-        sheetsLayer
+        ZStack {
+            sheetsLayer
+
+            if let kind = celebration {
+                CelebrationView(kind: kind, streak: streak) {
+                    celebrationFinished()
+                }
+                .transition(.opacity)
+                .zIndex(1000)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: celebration)
     }
 
     private var sheetsLayer: some View {
@@ -89,7 +105,13 @@ struct TodayView: View {
             .sheet(isPresented: $showMilestoneUnlock, content: milestoneSheet)
             .sheet(isPresented: $showSwearSheet) {
                 SwearView(dayKey: DayLogic.dayKey()) {
-                    DispatchQueue.main.async { publishDayState() }
+                    DispatchQueue.main.async {
+                        publishDayState()
+                        // Let the swear sheet fully close before celebrating.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                            enqueueCelebration(.day)
+                        }
+                    }
                 }
             }
             #if DEBUG
@@ -116,7 +138,7 @@ struct TodayView: View {
                 Button("Undo All", role: .destructive) { debugUndoAll() }
                 Button("Cancel", role: .cancel) { }
             } message: {
-                Text("This removes every completion record, the day lock, and the voice swear for \(DayLogic.dayKey()). Exercises themselves are untouched.")
+                Text("Removes every completion record, the day lock, and the voice swear for \(DayLogic.dayKey()). Exercises themselves are untouched.")
             }
             #endif
     }
@@ -357,6 +379,30 @@ struct TodayView: View {
                 && !isLockedToday
             )
 
+            Divider().frame(height: 16)
+
+            Button {
+                celebration = nil
+                celebrationQueue.removeAll()
+                enqueueCelebration(.day)
+            } label: {
+                Label("Test Day", systemImage: "sparkles")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            Button {
+                celebration = nil
+                celebrationQueue.removeAll()
+                enqueueCelebration(.milestone(30))
+            } label: {
+                Label("Test 30d", systemImage: "trophy.fill")
+                    .font(.caption)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
             Spacer()
 
             Text(debugStatusText)
@@ -416,17 +462,12 @@ struct TodayView: View {
     private func debugUndoAll() {
         let key = DayLogic.dayKey()
 
-        // Delete today's completion records.
         for record in records where record.dayKey == key {
             context.delete(record)
         }
-
-        // Delete today's voice swear, if any.
         for swear in swears where swear.dayKey == key {
             context.delete(swear)
         }
-
-        // Delete today's day lock, if any.
         for lock in dayLocks where lock.dayKey == key {
             context.delete(lock)
         }
@@ -437,9 +478,11 @@ struct TodayView: View {
             print("⚠️ debugUndoAll save failed: \(error)")
         }
 
-        // Close any sheet that might now be showing stale state.
         showDayCompletePrompt = false
         showSwearSheet = false
+        celebration = nil
+        celebrationQueue.removeAll()
+        pendingMilestoneCelebration = nil
 
         publishDayState()
     }
@@ -663,6 +706,49 @@ struct TodayView: View {
         .padding(16)
     }
 
+    // MARK: - Celebration orchestration
+
+    private func enqueueCelebration(_ kind: CelebrationKind) {
+        if celebration == nil {
+            celebration = kind
+        } else {
+            celebrationQueue.append(kind)
+        }
+    }
+
+    private func celebrationFinished() {
+        let justFinished = celebration
+        celebration = nil
+
+        // If the day celebration just ended and a milestone is waiting,
+        // chain straight into it.
+        if case .day = justFinished, let target = pendingMilestoneCelebration {
+            pendingMilestoneCelebration = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                celebration = .milestone(target)
+            }
+            return
+        }
+
+        // If a milestone celebration just ended, open the reflection sheet.
+        if case .milestone = justFinished {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                showMilestoneUnlock = true
+            }
+            return
+        }
+
+        // Otherwise play whatever is queued.
+        if !celebrationQueue.isEmpty {
+            let next = celebrationQueue.removeFirst()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                celebration = next
+            }
+        }
+    }
+
+    // MARK: - State
+
     private func publishDayState() {
         DayState.shared.allDone = allDone
         DayState.shared.isLocked = isLockedToday
@@ -719,7 +805,10 @@ struct TodayView: View {
             let m = Milestone(day: target)
             context.insert(m)
             try? context.save()
-            showMilestoneUnlock = true
+            // Don't fire the celebration immediately — wait until the day
+            // celebration is done so the two chain gracefully.
+            pendingMilestoneCelebration = target
+            break
         }
     }
 }
