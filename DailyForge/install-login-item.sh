@@ -19,12 +19,44 @@ log "DailyForge launcher started"
 
 
 # ============================================================
-# 0. Rest days (Thursday = 4, Friday = 5 in `date +%u`)
+# 0. Rest days — read from user preferences
 # ============================================================
+#
+# Swift's Gregorian `weekday` is: Sunday=1, Monday=2, …, Saturday=7.
+# `date +%w` is: Sunday=0, Monday=1, …, Saturday=6.
+# So we add 1 to `date +%w` to match Swift.
+#
+# The `restDaysRaw` preference is a comma-separated list of these
+# Swift weekday numbers, e.g. "5,6" for Thursday + Friday.
 
-DOW=$(/bin/date +%u)
-if [ "$DOW" = "4" ] || [ "$DOW" = "5" ]; then
-    log "Rest day (Thu/Fri). Nothing to enforce."
+if [ -f "$PREFS" ]; then
+    REST_DAYS_RAW=$(
+        /usr/bin/plutil -extract restDaysRaw raw "$PREFS" 2>/dev/null \
+        || echo "5,6"
+    )
+else
+    REST_DAYS_RAW="5,6"
+fi
+
+# Defensive: strip any surrounding whitespace, strip any "Optional(...)"
+# wrapper plutil sometimes emits, and drop brackets if it came back as
+# an array-style string.
+REST_DAYS_RAW=$(echo "$REST_DAYS_RAW" | /usr/bin/tr -d '[]' | /usr/bin/xargs)
+
+SWIFT_DOW=$(( $(/bin/date +%w) + 1 ))
+
+IS_REST=0
+IFS=',' read -ra REST_ARRAY <<< "$REST_DAYS_RAW"
+for day in "${REST_ARRAY[@]}"; do
+    trimmed=$(echo "$day" | /usr/bin/xargs)
+    if [ "$trimmed" = "$SWIFT_DOW" ]; then
+        IS_REST=1
+        break
+    fi
+done
+
+if [ "$IS_REST" = "1" ]; then
+    log "Rest day (weekday=$SWIFT_DOW, configured: $REST_DAYS_RAW). Nothing to enforce."
     exit 0
 fi
 

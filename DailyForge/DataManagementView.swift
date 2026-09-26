@@ -18,18 +18,19 @@ struct DataManagementView: View {
     @State private var showWipeConfirmation = false
     @State private var showResetPrefsConfirmation = false
 
+    private var tint: Color { PreferencesTab.data.tint }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                storageInfo
-                quickActions
-                backupList
-                statusBar
-                #if DEBUG
-                dangerZone
-                #endif
+        PreferencesScroll {
+            storageCard
+            actionsCard
+            backupListCard
+            if let message = statusMessage {
+                statusBanner(message)
             }
-            .padding(24)
+            #if DEBUG
+            dangerZoneCard
+            #endif
         }
         .onAppear(perform: refresh)
         .confirmationDialog(
@@ -62,22 +63,37 @@ struct DataManagementView: View {
         }
     }
 
-    private var storageInfo: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Storage").font(.headline)
+    // MARK: Storage
 
+    private var storageCard: some View {
+        PreferenceCard(
+            icon: "externaldrive.fill",
+            tint: tint,
+            title: "Storage",
+            subtitle: "Where DailyForge keeps your data."
+        ) {
             HStack(spacing: 12) {
-                statCard(title: "Active store",
-                         value: ByteCountFormatter.string(fromByteCount: activeStoreSize, countStyle: .file),
-                         subtitle: "your live data")
-                statCard(title: "Backups",
-                         value: "\(backups.count)",
-                         subtitle: ByteCountFormatter.string(fromByteCount: totalBackupSize, countStyle: .file))
+                statTile(
+                    title: "Active store",
+                    value: ByteCountFormatter.string(fromByteCount: activeStoreSize, countStyle: .file),
+                    subtitle: "live data",
+                    accent: tint
+                )
+                statTile(
+                    title: "Backups",
+                    value: "\(backups.count)",
+                    subtitle: ByteCountFormatter.string(fromByteCount: totalBackupSize, countStyle: .file),
+                    accent: tint
+                )
             }
 
             if let base = StoreBackup.discoverStoreBasePath() {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Store location").font(.caption).foregroundStyle(Theme.textSecondary)
+                    Text("Store location")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .textCase(.uppercase)
+                        .tracking(0.4)
                     Text(base.path)
                         .font(.caption.monospaced())
                         .foregroundStyle(Theme.textTertiary)
@@ -89,79 +105,110 @@ struct DataManagementView: View {
         }
     }
 
-    private func statCard(title: String, value: String, subtitle: String) -> some View {
+    private func statTile(title: String, value: String, subtitle: String, accent: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption).foregroundStyle(Theme.textSecondary)
-            Text(value).font(.title3.bold().monospacedDigit())
-            Text(subtitle).font(.caption2).foregroundStyle(Theme.textTertiary)
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.4)
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(accent)
+            Text(subtitle)
+                .font(.caption2)
+                .foregroundStyle(Theme.textTertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Theme.surfaceElevated)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.surfaceSunken)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    private var quickActions: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Actions").font(.headline)
+    // MARK: Actions
 
-            HStack(spacing: 10) {
-                Button { runBackupNow() } label: {
+    private var actionsCard: some View {
+        PreferenceCard(
+            icon: "square.and.arrow.up",
+            tint: tint,
+            title: "Actions",
+            subtitle: "Backup, reveal, or export your data."
+        ) {
+            HStack(spacing: 8) {
+                Button {
+                    runBackupNow()
+                } label: {
                     Label("Backup Now", systemImage: "square.and.arrow.down")
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(tint)
                 .disabled(isBusy)
 
-                Button { revealBackups() } label: {
-                    Label("Reveal in Finder", systemImage: "folder")
+                Button {
+                    revealBackups()
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
 
-                Button { exportAs() } label: {
+                Button {
+                    exportAs()
+                } label: {
                     Label("Export JSON…", systemImage: "square.and.arrow.up")
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
 
                 Spacer()
             }
 
-            Text("Export writes every exercise, record, swear, and milestone as a human-readable JSON file.")
-                .font(.caption)
-                .foregroundStyle(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textTertiary)
+                Text("Export writes every exercise, record, swear, and milestone as a human-readable JSON file.")
+                    .font(.caption)
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
-    private var backupList: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Backups").font(.headline)
-                Spacer()
-                Text("\(backups.count) available")
-                    .font(.caption)
-                    .foregroundStyle(Theme.textSecondary)
-            }
+    // MARK: Backup list
 
+    private var backupListCard: some View {
+        PreferenceCard(
+            icon: "clock.arrow.circlepath",
+            tint: tint,
+            title: "Backups",
+            subtitle: "\(backups.count) available"
+        ) {
             if backups.isEmpty {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Image(systemName: "tray")
-                        .foregroundStyle(Theme.textSecondary)
+                        .foregroundStyle(Theme.textTertiary)
                     Text("No backups yet. The app creates one automatically each day you launch it.")
                         .font(.callout)
                         .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(14)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surfaceElevated)
-                .overlay(
+                .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(Theme.border, lineWidth: 0.5)
+                        .fill(Theme.surfaceSunken)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 10))
             } else {
                 VStack(spacing: 8) {
                     ForEach(backups) { info in
@@ -174,12 +221,18 @@ struct DataManagementView: View {
 
     private func backupRow(_ info: BackupInfo) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "clock.arrow.circlepath")
-                .foregroundStyle(Theme.accentFill)
-                .frame(width: 22)
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.15))
+                    .frame(width: 32, height: 32)
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(info.displayName).font(.callout.weight(.medium))
+                Text(info.displayName)
+                    .font(.callout.weight(.medium))
                 Text("\(info.displaySize) • \(info.fileCount) file\(info.fileCount == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(Theme.textSecondary)
@@ -187,73 +240,95 @@ struct DataManagementView: View {
 
             Spacer()
 
-            Button { restoreCandidate = info } label: {
+            Button {
+                restoreCandidate = info
+            } label: {
                 Label("Restore", systemImage: "arrow.counterclockwise")
+                    .font(.caption.weight(.semibold))
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            Button(role: .destructive) { deleteBackup(info) } label: {
+            Button(role: .destructive) {
+                deleteBackup(info)
+            } label: {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
             .help("Delete this backup")
         }
-        .padding(12)
-        .background(Theme.surfaceElevated)
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.surfaceSunken)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(Theme.border, lineWidth: 0.5)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    @ViewBuilder
-    private var statusBar: some View {
-        if let message = statusMessage {
-            HStack(spacing: 8) {
-                Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(statusIsError ? Theme.warning : Theme.success)
-                Text(message)
-                    .font(.callout)
-                    .lineLimit(3)
-                Spacer()
-                if !statusIsError, let url = lastExportURL {
-                    Button("Reveal") {
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
-                    }
-                    .controlSize(.small)
+    // MARK: Status
+
+    private func statusBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: statusIsError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(statusIsError ? Theme.warning : Theme.success)
+            Text(message)
+                .font(.callout)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if !statusIsError, let url = lastExportURL {
+                Button("Reveal") {
+                    NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
-                Button {
-                    statusMessage = nil
-                    lastExportURL = nil
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(Theme.textTertiary)
-                }
-                .buttonStyle(.plain)
+                .controlSize(.small)
             }
-            .padding(12)
-            .background(statusIsError ? Theme.warningSoft : Theme.successSoft)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            Button {
+                statusMessage = nil
+                lastExportURL = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(Theme.textTertiary)
+            }
+            .buttonStyle(.plain)
         }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(statusIsError ? Theme.warningSoft : Theme.successSoft)
+        )
     }
 
-    private var dangerZone: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Danger zone").font(.headline).foregroundStyle(Theme.danger)
+    // MARK: Danger zone
 
-            HStack(spacing: 10) {
-                Button(role: .destructive) { showWipeConfirmation = true } label: {
+    private var dangerZoneCard: some View {
+        PreferenceCard(
+            icon: "exclamationmark.triangle.fill",
+            tint: Theme.danger,
+            title: "Danger zone",
+            subtitle: "Irreversible actions — proceed with care."
+        ) {
+            HStack(spacing: 8) {
+                Button(role: .destructive) {
+                    showWipeConfirmation = true
+                } label: {
                     Label("Wipe All Data", systemImage: "trash")
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .tint(Theme.danger)
 
-                Button(role: .destructive) { showResetPrefsConfirmation = true } label: {
+                Button(role: .destructive) {
+                    showResetPrefsConfirmation = true
+                } label: {
                     Label("Reset Preferences", systemImage: "arrow.counterclockwise")
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .tint(Theme.danger)
 
                 Spacer()
@@ -264,9 +339,6 @@ struct DataManagementView: View {
                 .foregroundStyle(Theme.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .background(Theme.dangerSoft)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
         .confirmationDialog(
             "Reset Preferences?",
             isPresented: $showResetPrefsConfirmation,
@@ -278,6 +350,8 @@ struct DataManagementView: View {
             Text("Restores all settings to their defaults. Your exercises and history are not affected.")
         }
     }
+
+    // MARK: Actions
 
     private func refresh() {
         backups = StoreBackup.listBackups()

@@ -122,6 +122,9 @@ final class DailySwear {
 final class UserProfile {
     var id: UUID
     var displayName: String
+    /// Age in years. Defaults to 0 for records created before this field
+    /// existed; the UI treats 0 as "not set".
+    var age: Int = 0
     var startDate: Date
     var initialWeightKg: Double
     var goalWeightKg: Double
@@ -131,12 +134,14 @@ final class UserProfile {
 
     init(
         displayName: String,
+        age: Int = 0,
         initialWeightKg: Double,
         goalWeightKg: Double,
         initialHeightCm: Double
     ) {
         self.id = UUID()
         self.displayName = displayName
+        self.age = age
         self.startDate = Date()
         self.initialWeightKg = initialWeightKg
         self.goalWeightKg = goalWeightKg

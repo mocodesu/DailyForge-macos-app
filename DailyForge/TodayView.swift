@@ -12,6 +12,10 @@ struct TodayView: View {
     @Query private var swears: [DailySwear]
     @Query private var milestones: [Milestone]
 
+    // User-configurable schedule
+    @AppStorage(PreferenceKeys.minimumExercises) private var minimumExercises: Int = Preferences.defaultMinimumExercises
+    @AppStorage(PreferenceKeys.restDaysRaw) private var restDaysRaw: String = Preferences.defaultRestDaysRaw
+
     @State private var selectedExercise: Exercise?
     @State private var exerciseToEdit: Exercise?
     @State private var activeSession: Exercise?
@@ -33,10 +37,49 @@ struct TodayView: View {
     @State private var showDebugUndoConfirmation = false
     #endif
 
-    private let minimumExercises = 5
     private let minuteTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
-    private var isRestDay: Bool { DayLogic.isRestDay(today) }
+    // MARK: Schedule helpers
+
+    private var restDays: Set<Int> {
+        let parsed = restDaysRaw
+            .split(separator: ",")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            .filter { (1...7).contains($0) }
+        return Set(parsed.prefix(Preferences.maxRestDays))
+    }
+
+    private var isRestDay: Bool {
+        let weekday = Calendar.current.component(.weekday, from: today)
+        return restDays.contains(weekday)
+    }
+
+    private var restDayDescription: String {
+        if restDays.isEmpty {
+            return "No rest days configured. Every day counts."
+        }
+        let names = WeekdayNames.full
+        let sorted = restDays.sorted()
+        if sorted.count == 1 { return "\(names[sorted[0] - 1]) is a rest day." }
+        let head = sorted.dropLast().map { names[$0 - 1] }.joined(separator: ", ")
+        let tail = names[sorted.last! - 1]
+        return "\(head) and \(tail) are rest days."
+    }
+
+    private var nextWorkoutDayLabel: String {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: today)
+        let names = WeekdayNames.full
+        for offset in 1...7 {
+            guard let candidate = calendar.date(byAdding: .day, value: offset, to: start) else { break }
+            let weekday = calendar.component(.weekday, from: candidate)
+            if !restDays.contains(weekday) { return names[weekday - 1] }
+        }
+        return "—"
+    }
+
+    // MARK: Derived state
+
     private var exercises: [Exercise] {
         DayLogic.activeExercises(from: allExercises, on: today)
     }
@@ -107,7 +150,6 @@ struct TodayView: View {
                 SwearView(dayKey: DayLogic.dayKey()) {
                     DispatchQueue.main.async {
                         publishDayState()
-                        // Let the swear sheet fully close before celebrating.
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                             enqueueCelebration(.day)
                         }
@@ -150,6 +192,8 @@ struct TodayView: View {
             .onChange(of: allDone, handleAllDoneChange)
             .onChange(of: exercises.count, handleExerciseCountChange)
             .onChange(of: isLockedToday) { _, _ in publishDayState() }
+            .onChange(of: minimumExercises) { _, _ in publishDayState() }
+            .onChange(of: restDaysRaw) { _, _ in publishDayState() }
     }
 
     private var baseLayer: some View {
@@ -341,8 +385,6 @@ struct TodayView: View {
     }
 
     #if DEBUG
-    // MARK: - Debug Bar
-
     private var debugBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "ladybug.fill")
@@ -373,11 +415,7 @@ struct TodayView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .disabled(
-                completedToday.isEmpty
-                && !sworeToday
-                && !isLockedToday
-            )
+            .disabled(completedToday.isEmpty && !sworeToday && !isLockedToday)
 
             Divider().frame(height: 16)
 
@@ -426,7 +464,7 @@ struct TodayView: View {
     private var debugStatusText: String {
         let records = completedToday.count
         let total = exercises.count
-        var bits: [String] = ["\(records)/\(total) done"]
+        var bits: [String] = ["\(records)/\(total) done", "min \(minimumExercises)"]
         if sworeToday { bits.append("sworn") }
         if isLockedToday { bits.append("locked") }
         if isRestDay { bits.append("rest") }
@@ -587,10 +625,10 @@ struct TodayView: View {
 
             Text("Rest day").font(.largeTitle.bold())
 
-            Text("Thursdays and Fridays are rest days. Recover, recharge — your streak is safe.")
+            Text("\(restDayDescription) Recover, recharge — your streak is safe.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(Theme.textSecondary)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 460)
 
             if streak > 0 {
                 Text("\(streak) day streak")
@@ -602,10 +640,15 @@ struct TodayView: View {
                     .clipShape(Capsule())
             }
 
-            Text("Next workout day: Saturday")
+            Text("Next workout day: \(nextWorkoutDayLabel)")
                 .font(.caption)
                 .foregroundStyle(Theme.textTertiary)
                 .padding(.top, 4)
+
+            Button("Edit schedule") { PreferencesOpener.open() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .padding(.top, 6)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
@@ -720,8 +763,6 @@ struct TodayView: View {
         let justFinished = celebration
         celebration = nil
 
-        // If the day celebration just ended and a milestone is waiting,
-        // chain straight into it.
         if case .day = justFinished, let target = pendingMilestoneCelebration {
             pendingMilestoneCelebration = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
@@ -730,7 +771,6 @@ struct TodayView: View {
             return
         }
 
-        // If a milestone celebration just ended, open the reflection sheet.
         if case .milestone = justFinished {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 showMilestoneUnlock = true
@@ -738,7 +778,6 @@ struct TodayView: View {
             return
         }
 
-        // Otherwise play whatever is queued.
         if !celebrationQueue.isEmpty {
             let next = celebrationQueue.removeFirst()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
@@ -805,8 +844,6 @@ struct TodayView: View {
             let m = Milestone(day: target)
             context.insert(m)
             try? context.save()
-            // Don't fire the celebration immediately — wait until the day
-            // celebration is done so the two chain gracefully.
             pendingMilestoneCelebration = target
             break
         }

@@ -19,12 +19,21 @@ enum PreferenceKeys {
 
     static let unitSystem = "unitSystem"
 
+    // Training schedule
+    static let minimumExercises = "minimumExercises"
+    static let restDaysRaw = "restDaysRaw"
+
     static let swearPhrase = "swearPhrase"
     static let swearPhraseIsDefault = "swearPhraseIsDefault"
 }
 
 struct Preferences {
     static let defaultSwearPhrase = "I swear by God that I completed all my daily exercises today"
+
+    static let defaultMinimumExercises = 5
+    static let defaultRestDaysRaw = "5,6"   // Thu, Fri
+    static let maxRestDays = 3
+    static let minimumExercisesRange: ClosedRange<Int> = 1...20
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -44,11 +53,33 @@ struct Preferences {
 
             PreferenceKeys.unitSystem: UnitSystem.metric.rawValue,
 
+            PreferenceKeys.minimumExercises: defaultMinimumExercises,
+            PreferenceKeys.restDaysRaw: defaultRestDaysRaw,
+
             PreferenceKeys.swearPhrase: defaultSwearPhrase,
             PreferenceKeys.swearPhraseIsDefault: true
         ])
     }
+}
 
+// MARK: - Weekday names
+
+enum WeekdayNames {
+    /// Indexed by Gregorian weekday - 1 (Sun = 0).
+    static let short: [String] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    static let full: [String] = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
+    ]
+    static let letters: [String] = ["S", "M", "T", "W", "T", "F", "S"]
+
+    /// "Thu, Fri" or "None"
+    static func joined(weekdays: Set<Int>, style: Style = .short) -> String {
+        guard !weekdays.isEmpty else { return "None" }
+        let names = style == .short ? short : full
+        return weekdays.sorted().map { names[$0 - 1] }.joined(separator: ", ")
+    }
+
+    enum Style { case short, full }
 }
 
 // MARK: - Unit System
